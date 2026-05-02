@@ -33,6 +33,34 @@ jobs:
         run: |
           python -m robot -d Result Tests/ || true
 
+      # 🔥 👉 Résumé GLOBAL (compteur)
+      - name: Generate Summary
+        run: |
+          echo "## 🚀 Robot Framework Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PASS | $(grep -o 'status=\"PASS\"' Result/output.xml | wc -l) |" >> $GITHUB_STEP_SUMMARY
+          echo "| FAIL | $(grep -o 'status=\"FAIL\"' Result/output.xml | wc -l) |" >> $GITHUB_STEP_SUMMARY
+
+      # 🔥 👉 Tableau DÉTAILLÉ (test par test)
+      - name: Detailed Test Results
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 Detailed Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Case | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          grep -E '<test name=|status="(PASS|FAIL)"' Result/output.xml | \
+          sed 's/.*<test name="\([^"]*\)".*/\1/' | \
+          paste - - | \
+          while read name status; do
+            if echo "$status" | grep -q "PASS"; then
+              echo "| $name | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $name | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
         with:
