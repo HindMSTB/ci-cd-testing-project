@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-
   pull_request:
 
 jobs:
@@ -33,10 +32,9 @@ jobs:
         run: |
           python -m robot -d Result Tests/ || true
 
-      # 🔥 Résumé + tableau CORRECT
       - name: Generate Clean Summary
         run: |
-          python <<EOF > summary.md
+          python - <<EOF > summary.md
 import xml.etree.ElementTree as ET
 
 tree = ET.parse('Result/output.xml')
@@ -77,7 +75,6 @@ EOF
 
           cat summary.md >> $GITHUB_STEP_SUMMARY
 
-      # 📦 Upload des rapports
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
         with:
