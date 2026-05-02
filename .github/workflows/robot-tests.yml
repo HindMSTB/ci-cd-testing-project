@@ -33,41 +33,49 @@ jobs:
         run: |
           python -m robot -d Result Tests/ || true
 
-      # 🔥 Résumé GLOBAL (uniquement les tests)
-      - name: Generate Summary
+      # 🔥 Résumé + tableau CORRECT
+      - name: Generate Clean Summary
         run: |
-          echo "## Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          python <<EOF > summary.md
+import xml.etree.ElementTree as ET
 
-          PASS_COUNT=$(grep '<test ' Result/output.xml | grep 'status="PASS"' | wc -l)
-          FAIL_COUNT=$(grep '<test ' Result/output.xml | grep 'status="FAIL"' | wc -l)
+tree = ET.parse('Result/output.xml')
+root = tree.getroot()
 
-          echo "| PASS | $PASS_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "| FAIL | $FAIL_COUNT |" >> $GITHUB_STEP_SUMMARY
+tests = root.findall(".//test")
 
-      # 🔥 Tableau DÉTAILLÉ (test par test correct)
-      - name: Detailed Test Results
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🧪 Detailed Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Case | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+passed = 0
+failed = 0
 
-          awk '
-          /<test name=/ {
-              match($0, /name="([^"]+)"/, name)
-          }
-          /<status status=/ {
-              match($0, /status="([^"]+)"/, status)
-              print name[1] "," status[1]
-          }' Result/output.xml | while IFS=, read name status; do
-              if [ "$status" = "PASS" ]; then
-                  echo "| $name | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
-              else
-                  echo "| $name | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
-              fi
-          done
+print("## 🚀 Robot Framework Results")
+print("| Status | Count |")
+print("|--------|--------|")
+
+for t in tests:
+    status = t.find("status").attrib.get("status")
+    if status == "PASS":
+        passed += 1
+    elif status == "FAIL":
+        failed += 1
+
+print(f"| PASS | {passed} |")
+print(f"| FAIL | {failed} |")
+
+print("\n## 🧪 Detailed Test Results")
+print("| Test Case | Status |")
+print("|-----------|--------|")
+
+for t in tests:
+    name = t.attrib.get("name")
+    status = t.find("status").attrib.get("status")
+
+    if status == "PASS":
+        print(f"| {name} | ✅ PASS |")
+    else:
+        print(f"| {name} | ❌ FAIL |")
+EOF
+
+          cat summary.md >> $GITHUB_STEP_SUMMARY
 
       # 📦 Upload des rapports
       - name: Upload Robot Results
