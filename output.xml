@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 7.4.2 (Python 3.13.7 on win32)" generated="2026-05-02T13:11:53.349546" rpa="false" schemaversion="5">
+<suite id="s1" name="Login" source="D:\pfe\ci-cd-testing-project\Tests\login.robot">
+<test id="s1-t1" name="Login Success Case" line="6">
+<kw name="Open Login Page" owner="login">
+<kw name="New Browser" owner="Browser">
+<msg time="2026-05-02T13:11:53.574762" level="INFO">{"browser": "chromium", "headless": true, "chromiumSandbox": false, "devtools": false, "handleSIGHUP": true, "handleSIGINT": true, "handleSIGTERM": true, "slowMo": 0.0, "timeout": 30000.0, "tracesDir": "D:\\pfe\\ci-cd-testing-project\\browser\\traces\\temp\\62a85a6a-ad9b-4f05-8f74-693b74a13c38"}</msg>
+<msg time="2026-05-02T13:11:53.609711" level="INFO">Starting Browser process C:\Users\dell\AppData\Roaming\Python\Python313\site-packages\Browser\wrapper\index.js using at 127.0.0.1:58890</msg>
+<msg time="2026-05-02T13:11:54.784474" level="INFO">Successfully created browser with options: {"browser":"chromium","headless":true,"chromiumSandbox":false,"devtools":false,"handleSIGHUP":true,"handleSIGINT":true,"handleSIGTERM":true,"slowMo":0,"timeout":30000,"tracesDir":"D:\\pfe\\ci-cd-testing-project\\browser\\traces\\temp\\62a85a6a-ad9b-4f05-8f74-693b74a13c38"}</msg>
+<arg>chromium</arg>
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Create a new playwright Browser with specified options.</doc>
+<status status="PASS" start="2026-05-02T13:11:53.574148" elapsed="1.210601"/>
+</kw>
+<kw name="New Page" owner="Browser">
+<msg time="2026-05-02T13:12:04.905582" level="INFO">Keyword 'Take Screenshot  fail-screenshot-{index}' could not be run on failure:
+Error: Tried to take screenshot, but no page was open.</msg>
+<msg time="2026-05-02T13:12:04.905736" level="INFO">See also file:///D:/pfe/ci-cd-testing-project/playwright-log.txt for additional details.</msg>
+<msg time="2026-05-02T13:12:04.906197" level="FAIL">TimeoutError: page.goto: Timeout 10000ms exceeded.
+Call log:
+  - navigating to "https://www.saucedemo.com/", waiting until "load"
+</msg>
+<arg>${URL}</arg>
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Open a new Page.</doc>
+<status status="FAIL" start="2026-05-02T13:11:54.785613" elapsed="10.127692">TimeoutError: page.goto: Timeout 10000ms exceeded.
+Call log:
+  - navigating to "https://www.saucedemo.com/", waiting until "load"
+</status>
+</kw>
+<status status="FAIL" start="2026-05-02T13:11:53.573499" elapsed="11.340122">TimeoutError: page.goto: Timeout 10000ms exceeded.
+Call log:
+  - navigating to "https://www.saucedemo.com/", waiting until "load"
+</status>
+</kw>
+<kw name="Login" owner="login">
+<arg>standard_user</arg>
+<arg>secret_sauce</arg>
+<status status="NOT RUN" start="2026-05-02T13:12:04.914078" elapsed="0.000172"/>
+</kw>
+<kw name="Verify Login Success" owner="login">
+<status status="NOT RUN" start="2026-05-02T13:12:04.914643" elapsed="0.000106"/>
+</kw>
+<kw name="Close Browser" owner="Browser">
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Closes the current browser.</doc>
+<status status="NOT RUN" start="2026-05-02T13:12:04.915022" elapsed="0.000118"/>
+</kw>
+<msg time="2026-05-02T13:12:04.925510" level="INFO">Switching context to context=63166cba-bf47-4224-8d03-02bd23f8a51c in CURRENT</msg>
+<msg time="2026-05-02T13:12:04.930237" level="INFO">Successfully changed active context: context=63166cba-bf47-4224-8d03-02bd23f8a51c</msg>
+<msg time="2026-05-02T13:12:04.935659" level="INFO">Successfully closed Context</msg>
+<status status="FAIL" start="2026-05-02T13:11:53.572760" elapsed="11.342717">TimeoutError: page.goto: Timeout 10000ms exceeded.
+Call log:
+  - navigating to "https://www.saucedemo.com/", waiting until "load"
+</status>
+</test>
+<test id="s1-t2" name="Login Failure Case" line="12">
+<kw name="Open Login Page" owner="login">
+<kw name="New Browser" owner="Browser">
+<msg time="2026-05-02T13:12:04.939452" level="INFO">Switching browser to browser=e3d14b03-6dec-4b2f-ab69-a411333ced8e</msg>
+<msg time="2026-05-02T13:12:04.941900" level="INFO">Successfully changed active browser: browser=e3d14b03-6dec-4b2f-ab69-a411333ced8e</msg>
+<msg time="2026-05-02T13:12:04.942011" level="INFO">Reusing existing browser with id: browser=e3d14b03-6dec-4b2f-ab69-a411333ced8e</msg>
+<arg>chromium</arg>
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Create a new playwright Browser with specified options.</doc>
+<status status="PASS" start="2026-05-02T13:12:04.938910" elapsed="0.003169"/>
+</kw>
+<kw name="New Page" owner="Browser">
+<msg time="2026-05-02T13:12:08.046748" level="INFO">Successfully initialized new page object and opened url: https://www.saucedemo.com/</msg>
+<msg time="2026-05-02T13:12:08.046820" level="INFO">No context was open. New context was automatically opened when this page is created.</msg>
+<arg>${URL}</arg>
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Open a new Page.</doc>
+<status status="PASS" start="2026-05-02T13:12:04.942235" elapsed="3.104713"/>
+</kw>
+<status status="PASS" start="2026-05-02T13:12:04.938470" elapsed="3.108591"/>
+</kw>
+<kw name="Login" owner="login">
+<kw name="Fill Text" owner="Browser">
+<msg time="2026-05-02T13:12:08.048615" level="INFO">Fills the text 'locked_out_user' in the given field.</msg>
+<arg>id=user-name</arg>
+<arg>${username}</arg>
+<tag>PageContent</tag>
+<tag>Setter</tag>
+<doc>Clears and fills the given ``txt`` into the text field found by ``selector``.</doc>
+<status status="PASS" start="2026-05-02T13:12:08.048102" elapsed="0.045363"/>
+</kw>
+<kw name="Fill Text" owner="Browser">
+<msg time="2026-05-02T13:12:08.094113" level="INFO">Fills the text 'secret_sauce' in the given field.</msg>
+<arg>id=password</arg>
+<arg>${password}</arg>
+<tag>PageContent</tag>
+<tag>Setter</tag>
+<doc>Clears and fills the given ``txt`` into the text field found by ``selector``.</doc>
+<status status="PASS" start="2026-05-02T13:12:08.093640" elapsed="0.010696"/>
+</kw>
+<kw name="Click" owner="Browser">
+<msg time="2026-05-02T13:12:08.104957" level="INFO">Clicks the element 'id=login-button'.</msg>
+<arg>id=login-button</arg>
+<tag>PageContent</tag>
+<tag>Setter</tag>
+<doc>Simulates mouse click on the element found by ``selector``.</doc>
+<status status="PASS" start="2026-05-02T13:12:08.104507" elapsed="0.053905"/>
+</kw>
+<arg>locked_out_user</arg>
+<arg>secret_sauce</arg>
+<status status="PASS" start="2026-05-02T13:12:08.047532" elapsed="0.110997"/>
+</kw>
+<kw name="Verify Login Error" owner="login">
+<kw name="Get Text" owner="Browser">
+<msg time="2026-05-02T13:12:08.189410" level="INFO">Text: 'Epic sadface: Sorry, this user has been locked out.'</msg>
+<arg>css=h3</arg>
+<arg>==</arg>
+<arg>Epic sadface: Sorry, this user has been locked out.</arg>
+<tag>Assertion</tag>
+<tag>Getter</tag>
+<tag>PageContent</tag>
+<doc>Returns text attribute of the element found by ``selector``.</doc>
+<status status="PASS" start="2026-05-02T13:12:08.159116" elapsed="0.030437"/>
+</kw>
+<status status="PASS" start="2026-05-02T13:12:08.158801" elapsed="0.030867"/>
+</kw>
+<kw name="Close Browser" owner="Browser">
+<msg time="2026-05-02T13:12:08.233005" level="INFO">Closed browser</msg>
+<tag>BrowserControl</tag>
+<tag>Setter</tag>
+<doc>Closes the current browser.</doc>
+<status status="PASS" start="2026-05-02T13:12:08.189942" elapsed="0.043209"/>
+</kw>
+<status status="PASS" start="2026-05-02T13:12:04.936348" elapsed="3.297095"/>
+</test>
+<status status="FAIL" start="2026-05-02T13:11:53.351302" elapsed="14.886651"/>
+</suite>
+<statistics>
+<total>
+<stat pass="1" fail="1" skip="0">All Tests</stat>
+</total>
+<tag>
+</tag>
+<suite>
+<stat name="Login" id="s1" pass="1" fail="1" skip="0">Login</stat>
+</suite>
+</statistics>
+<errors>
+</errors>
+</robot>
