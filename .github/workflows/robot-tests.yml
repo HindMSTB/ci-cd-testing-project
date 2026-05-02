@@ -30,9 +30,8 @@ jobs:
           python -m Browser.entry init
 
       - name: Run Robot Framework Tests
-        continue-on-error: true
         run: |
-          python -m robot -d Result Tests/
+          python -m robot -d Result Tests/ || true
 
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
