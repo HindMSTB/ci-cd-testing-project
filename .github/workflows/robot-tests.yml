@@ -33,16 +33,20 @@ jobs:
         run: |
           python -m robot -d Result Tests/ || true
 
-      # 🔥 👉 Résumé GLOBAL (compteur)
+      # 🔥 Résumé GLOBAL (uniquement les tests)
       - name: Generate Summary
         run: |
-          echo "## 🚀 Robot Framework Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Results" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| PASS | $(grep -o 'status=\"PASS\"' Result/output.xml | wc -l) |" >> $GITHUB_STEP_SUMMARY
-          echo "| FAIL | $(grep -o 'status=\"FAIL\"' Result/output.xml | wc -l) |" >> $GITHUB_STEP_SUMMARY
 
-      # 🔥 👉 Tableau DÉTAILLÉ (test par test)
+          PASS_COUNT=$(grep '<test ' Result/output.xml | grep 'status="PASS"' | wc -l)
+          FAIL_COUNT=$(grep '<test ' Result/output.xml | grep 'status="FAIL"' | wc -l)
+
+          echo "| PASS | $PASS_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| FAIL | $FAIL_COUNT |" >> $GITHUB_STEP_SUMMARY
+
+      # 🔥 Tableau DÉTAILLÉ (test par test correct)
       - name: Detailed Test Results
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -50,17 +54,22 @@ jobs:
           echo "| Test Case | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
 
-          grep -E '<test name=|status="(PASS|FAIL)"' Result/output.xml | \
-          sed 's/.*<test name="\([^"]*\)".*/\1/' | \
-          paste - - | \
-          while read name status; do
-            if echo "$status" | grep -q "PASS"; then
-              echo "| $name | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| $name | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
-            fi
+          awk '
+          /<test name=/ {
+              match($0, /name="([^"]+)"/, name)
+          }
+          /<status status=/ {
+              match($0, /status="([^"]+)"/, status)
+              print name[1] "," status[1]
+          }' Result/output.xml | while IFS=, read name status; do
+              if [ "$status" = "PASS" ]; then
+                  echo "| $name | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
+              else
+                  echo "| $name | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
+              fi
           done
 
+      # 📦 Upload des rapports
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
         with:
