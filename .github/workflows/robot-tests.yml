@@ -1,0 +1,40 @@
+name: Robot Framework CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+jobs:
+  robot-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install robotframework
+          pip install robotframework-browser
+
+      - name: Install Playwright Browsers
+        run: |
+          python -m Browser.entry init
+
+      - name: Run Robot Framework Tests
+        run: |
+          python -m robot -d Result Tests/
+
+      - name: Upload Robot Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-results
+          path: Result/
