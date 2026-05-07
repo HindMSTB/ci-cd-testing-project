@@ -42,18 +42,24 @@ jobs:
           python -m Browser.entry init
 
       # =========================
-      # RUN TESTS (FIX OUTPUT FORMAT)
+      # RUN ROBOT TESTS (IMPORTANT FIX)
       # =========================
       - name: Run Robot Framework Tests
         run: |
-          robot --outputdir Result --output output.xml --log log.html --report report.html Tests/
+          robot \
+            --outputdir Result \
+            --output output.xml \
+            --log log.html \
+            --report report.html \
+            Tests/
 
       # =========================
-      # VERIFY OUTPUT FILE
+      # CHECK OUTPUT FILE
       # =========================
-      - name: Check Results
+      - name: Verify output.xml
         run: |
           ls -lah Result/
+          head -50 Result/output.xml
 
       # =========================
       # XRAY AUTH (EU REGION)
@@ -68,7 +74,7 @@ jobs:
           echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       # =========================
-      # XRAY UPLOAD (FIXED + SAFE)
+      # XRAY UPLOAD (FIXED)
       # =========================
       - name: Upload results to Xray
         shell: bash
@@ -83,14 +89,25 @@ jobs:
             -F "file=@Result/output.xml" \
             "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
 
-          echo "XRAY RESPONSE:"
+          echo "===== XRAY RESPONSE ====="
           echo "$RESPONSE"
 
       # =========================
-      # ARTIFACTS (REPORTS)
+      # ARTIFACTS
       # =========================
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
         with:
           name: robot-results
           path: Result/
+
+
+          ajouter - name: Run Robot Framework Tests
+  run: |
+    robot \
+      --outputdir Result \
+      --output output.xml \
+      --log log.html \
+      --report report.html \
+      --variable BROWSER:chromium \
+      Tests/
