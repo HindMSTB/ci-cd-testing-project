@@ -3,10 +3,9 @@ Resource    ../Keywords/login.resource
 
 *** Test Cases ***
 
-
 Login Success Case
     Open Login Page
-    Login    standard_user    wrong_password
+    Login    standard_user    secret_sauce
     Verify Login Success
     Close Browser
 
