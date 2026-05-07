@@ -106,9 +106,11 @@ jobs:
                   headers=headers, method=method)
               try:
                   with urllib.request.urlopen(req) as r:
-                      return json.loads(r.read().decode())
+                      body = r.read().decode()
+                      return json.loads(body) if body.strip() else {}
               except urllib.error.HTTPError as e:
-                  return {"error": e.read().decode()}
+                  body = e.read().decode()
+                  return {"error": body} if body.strip() else {"error": f"HTTP {e.code}"}
 
           def priority(msg):
               m = msg.lower()
@@ -117,24 +119,24 @@ jobs:
               return "Low"
 
           def bug_exists(summary):
-              # Recherche exacte par summary pour eviter les doublons
               safe = summary.replace("\\", "\\\\").replace('"', '\\"')
               jql  = urllib.request.quote(f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
               r    = jira("GET", f"search?jql={jql}&maxResults=1&fields=summary")
-              if r.get("total", 0) > 0:
-                  return r["issues"][0]["key"]
-              return None
+              return r["issues"][0]["key"] if r.get("total", 0) > 0 else None
 
           def link_bug_to_execution(bug_key):
-              # Lier le bug au Test Execution dans Jira
               if not EXEC_KEY:
                   return
               payload = {
                   "type": {"name": "Blocks"},
-                  "inwardIssue": {"key": bug_key},
+                  "inwardIssue":  {"key": bug_key},
                   "outwardIssue": {"key": EXEC_KEY}
               }
-              jira("POST", "issueLink", payload)
+              r = jira("POST", "issueLink", payload)
+              if r.get("error"):
+                  print(f"    Lien {bug_key} -> {EXEC_KEY} echoue: {str(r['error'])[:60]}")
+              else:
+                  print(f"    Lie a {EXEC_KEY}")
 
           def get_msg(test, st):
               msg = st.get('message', '').strip()
@@ -171,7 +173,6 @@ jobs:
 
               if key:
                   print(f"  SKIP (deja ouvert -> {key}) : {t['name']}")
-                  # Lier quand meme le bug existant au nouveau Test Execution
                   link_bug_to_execution(key)
                   skipped += 1
                   continue
