@@ -4,15 +4,9 @@ on:
   push:
     branches:
       - main
-
   pull_request:
-
-  # =============================================
-  # PLANIFICATION : chaque vendredi à 9h00 Maroc
-  # Morocco = UTC+1, donc 9h Maroc = 8h UTC
-  # =============================================
   schedule:
-    - cron: '0 8 * * 5'
+    - cron: '0 8 * * 5'   # Vendredi 9h Maroc
 
 jobs:
   robot-tests:
@@ -29,11 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install robotframework
-          pip install robotframework-browser
-
-      - name: Install Playwright Browsers
-        run: |
+          pip install robotframework robotframework-browser
           python -m Browser.entry init
 
       - name: Run Robot Framework Tests
@@ -89,117 +79,8 @@ jobs:
           echo "🔗 https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
           echo "=================================="
 
-      # =============================================
-      # STATISTIQUES
-      # =============================================
-      - name: Afficher statistiques des tests
-        if: always()
-        run: |
-          python3 - <<'PYEOF'
-          import xml.etree.ElementTree as ET
-          try:
-              tree = ET.parse('Result/output.xml')
-              root = tree.getroot()
-
-              total = passed = failed = skipped = 0
-
-              for stat in root.iter('stat'):
-                  name = stat.get('name', '') or (stat.text or '')
-                  if 'All Tests' in name or name.strip() == '':
-                      p = int(stat.get('pass', 0))
-                      f = int(stat.get('fail', 0))
-                      s = int(stat.get('skip', 0))
-                      if p + f + s > 0:
-                          passed, failed, skipped = p, f, s
-                          total = passed + failed + skipped
-                          break
-
-              if total == 0:
-                  for test in root.iter('test'):
-                      status = test.find('status')
-                      if status is not None:
-                          s = status.get('status', '')
-                          if s == 'PASS':   passed  += 1
-                          elif s == 'FAIL': failed  += 1
-                          elif s == 'SKIP': skipped += 1
-                          total += 1
-
-              print("")
-              print("================================================")
-              print("           📊 RAPPORT DES TESTS                 ")
-              print("================================================")
-              print("")
-              print("┌─────────────────────┬────────┐")
-              print("│ Statut              │ Nombre │")
-              print("├─────────────────────┼────────┤")
-              print(f"│ ✅ Tests réussis    │ {passed:<6} │")
-              print(f"│ ❌ Tests échoués   │ {failed:<6} │")
-              print(f"│ ⏭️  Tests ignorés   │ {skipped:<6} │")
-              print(f"│ 📋 Total            │ {total:<6} │")
-              print("└─────────────────────┴────────┘")
-
-              print("")
-              print("================================================")
-              print("           ❌ TESTS ÉCHOUÉS                     ")
-              print("================================================")
-
-              def get_msg(test, status):
-                  msg = status.get('message', '').strip()
-                  if msg: return msg
-                  for el in test.iter('msg'):
-                      if el.get('level') in ('FAIL','ERROR') and el.text:
-                          return el.text.strip()
-                  return 'Pas de message'
-
-              failed_tests = []
-              for test in root.iter('test'):
-                  status = test.find('status')
-                  if status is not None and status.get('status') == 'FAIL':
-                      name = test.get('name', 'Inconnu')
-                      message = get_msg(test, status)
-                      failed_tests.append((name, message))
-
-              if failed_tests:
-                  print(f"{'Nom du test':<45} {'Message erreur'}")
-                  print("-" * 90)
-                  for name, msg in failed_tests:
-                      short_msg = msg[:40] + "..." if len(msg) > 40 else msg
-                      print(f"{name:<45} {short_msg}")
-              else:
-                  print("✅ Aucun test échoué !")
-
-              print("")
-              print("================================================")
-              print("           ✅ TESTS RÉUSSIS                     ")
-              print("================================================")
-
-              passed_tests = []
-              for test in root.iter('test'):
-                  status = test.find('status')
-                  if status is not None and status.get('status') == 'PASS':
-                      passed_tests.append(test.get('name', 'Inconnu'))
-
-              if passed_tests:
-                  for i, name in enumerate(passed_tests, 1):
-                      print(f"  {i:>2}. ✅ {name}")
-              else:
-                  print("❌ Aucun test réussi.")
-
-              print("")
-              print("================================================")
-              print("  📦 Artifacts : output.xml | log.html | report.html")
-              print("================================================")
-
-          except Exception as e:
-              print(f"Erreur lecture XML: {e}")
-          PYEOF
-
-      # =============================================
-      # CRÉATION AUTOMATIQUE DE BUGS JIRA
-      # =============================================
       - name: Créer bugs Jira pour tests échoués
         if: always()
-        shell: bash
         env:
           JIRA_USER:      ${{ secrets.JIRA_USER }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
@@ -207,148 +88,102 @@ jobs:
           PROJECT_KEY:    QATEAM
         run: |
           python3 - <<'PYEOF'
-          import xml.etree.ElementTree as ET
-          import json, os, urllib.request, urllib.error, base64
+          import xml.etree.ElementTree as ET, json, os, urllib.request, urllib.error, base64
 
-          JIRA_USER      = os.environ["JIRA_USER"]
-          JIRA_API_TOKEN = os.environ["JIRA_API_TOKEN"]
-          JIRA_BASE_URL  = os.environ["JIRA_BASE_URL"]
-          PROJECT_KEY    = os.environ["PROJECT_KEY"]
-          RUN_URL        = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
+          USER  = os.environ["JIRA_USER"]
+          TOKEN = os.environ["JIRA_API_TOKEN"]
+          BASE  = os.environ["JIRA_BASE_URL"]
+          PROJ  = os.environ["PROJECT_KEY"]
+          RUN   = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
 
-          credentials = base64.b64encode(f"{JIRA_USER}:{JIRA_API_TOKEN}".encode()).decode()
-          headers = {
-              "Authorization": f"Basic {credentials}",
-              "Content-Type":  "application/json",
-              "Accept":        "application/json"
-          }
+          creds   = base64.b64encode(f"{USER}:{TOKEN}".encode()).decode()
+          headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json", "Accept": "application/json"}
 
-          def jira_request(method, path, data=None):
-              url  = f"{JIRA_BASE_URL}/rest/api/3/{path}"
-              body = json.dumps(data).encode() if data else None
-              req  = urllib.request.Request(url, data=body, headers=headers, method=method)
+          def jira(method, path, data=None):
+              req = urllib.request.Request(
+                  f"{BASE}/rest/api/3/{path}",
+                  data=json.dumps(data).encode() if data else None,
+                  headers=headers, method=method)
               try:
                   with urllib.request.urlopen(req) as r:
                       return json.loads(r.read().decode())
               except urllib.error.HTTPError as e:
                   return {"error": e.read().decode()}
 
-          def get_priority(message):
-              msg = message.lower()
-              if any(k in msg for k in ["critical","crash","timeout","connection"]):
-                  return "High"
-              if any(k in msg for k in ["assert","expected","found","not found"]):
-                  return "Medium"
+          def priority(msg):
+              m = msg.lower()
+              if any(k in m for k in ["critical","crash","timeout","connection"]): return "High"
+              if any(k in m for k in ["assert","expected","found","not found"]): return "Medium"
               return "Low"
 
-          def bug_exists(test_name):
-              safe = test_name.replace('"', '\\"')
-              jql  = f'project={PROJECT_KEY} AND issuetype=Bug AND summary~"[Robot] {safe}" AND statusCategory != Done'
-              enc  = urllib.request.quote(jql)
-              resp = jira_request("GET", f"search?jql={enc}&maxResults=1&fields=summary")
-              total = resp.get("total", 0)
-              if total > 0:
-                  return resp["issues"][0]["key"]
-              return None
+          def bug_exists(name):
+              safe = name.replace('"', '\\"')
+              jql  = urllib.request.quote(f'project={PROJ} AND issuetype=Bug AND summary~"[Robot] {safe}" AND statusCategory != Done')
+              r    = jira("GET", f"search?jql={jql}&maxResults=1&fields=summary")
+              return r["issues"][0]["key"] if r.get("total", 0) > 0 else None
 
-          def get_error_message(test, status):
-              # 1. Attribut message du noeud status
-              msg = status.get('message', '').strip()
-              if msg:
-                  return msg
-              # 2. Noeuds <msg> avec level FAIL ou ERROR dans le test
-              for msg_el in test.iter('msg'):
-                  if msg_el.get('level') in ('FAIL', 'ERROR') and msg_el.text:
-                      return msg_el.text.strip()
-              # 3. Message dans keyword échoué
+          def get_msg(test, st):
+              msg = st.get('message', '').strip()
+              if msg: return msg
+              for el in test.iter('msg'):
+                  if el.get('level') in ('FAIL','ERROR') and el.text: return el.text.strip()
               for kw in test.iter('kw'):
-                  kw_status = kw.find('status')
-                  if kw_status is not None and kw_status.get('status') == 'FAIL':
-                      for msg_el in kw.iter('msg'):
-                          if msg_el.text:
-                              return msg_el.text.strip()
-              return 'Aucun message disponible'
+                  kst = kw.find('status')
+                  if kst is not None and kst.get('status') == 'FAIL':
+                      for el in kw.iter('msg'):
+                          if el.text: return el.text.strip()
+              return 'Aucun message'
 
-          # Lire les tests échoués
           try:
-              tree = ET.parse("Result/output.xml")
-              root = tree.getroot()
+              root = ET.parse("Result/output.xml").getroot()
           except Exception as e:
-              print(f"❌ Impossible de lire output.xml: {e}")
-              exit(0)
+              print(f"❌ {e}"); exit(0)
 
-          failed_tests = []
+          fails = []
           for test in root.iter("test"):
-              status = test.find("status")
-              if status is not None and status.get("status") == "FAIL":
-                  message = get_error_message(test, status)
-                  failed_tests.append({
-                      "name":    test.get("name", "Inconnu"),
-                      "message": message
-                  })
+              st = test.find("status")
+              if st is not None and st.get("status") == "FAIL":
+                  fails.append({"name": test.get("name","?"), "msg": get_msg(test, st)})
 
-          if not failed_tests:
-              print("✅ Aucun test échoué — pas de bug à créer.")
-              exit(0)
+          if not fails:
+              print("✅ Aucun test échoué — pas de bug à créer."); exit(0)
 
-          print("")
-          print("============================================================")
-          print("  🐛 CRÉATION AUTOMATIQUE DES BUGS JIRA")
-          print("============================================================")
-          print("")
-
+          print(f"\n{'='*60}\n  🐛 BUGS JIRA\n{'='*60}\n")
           created = skipped = errors = 0
 
-          for t in failed_tests:
-              summary  = f"[Robot] {t['name']}"
-              priority = get_priority(t["message"])
-
-              existing = bug_exists(t["name"])
-              if existing:
-                  print(f"  ⏭️  SKIP   (déjà ouvert → {existing}) : {t['name']}")
+          for t in fails:
+              key = bug_exists(t["name"])
+              if key:
+                  print(f"  ⏭️  SKIP (déjà ouvert → {key}) : {t['name']}")
                   skipped += 1
                   continue
 
-              description = {
-                  "version": 1,
-                  "type": "doc",
-                  "content": [
-                      {"type": "paragraph", "content": [{"type": "text", "text": "🤖 Bug détecté automatiquement par le pipeline CI/CD Robot Framework."}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"📋 Test échoué : {t['name']}"}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"❌ Message d'erreur : {t['message']}"}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"🔗 GitHub Actions Run : {RUN_URL}"}]}
-                  ]
-              }
+              prio    = priority(t["msg"])
+              payload = {"fields": {
+                  "project":     {"key": PROJ},
+                  "summary":     f"[Robot] {t['name']}",
+                  "issuetype":   {"name": "Bug"},
+                  "priority":    {"name": prio},
+                  "labels":      ["automated", "robot-framework", "ci-cd"],
+                  "description": {"version": 1, "type": "doc", "content": [
+                      {"type": "paragraph", "content": [{"type": "text", "text": "🤖 Bug CI/CD Robot Framework"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"📋 Test : {t['name']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"❌ Erreur : {t['msg']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"🔗 Run : {RUN}"}]}
+                  ]}
+              }}
 
-              payload = {
-                  "fields": {
-                      "project":     {"key": PROJECT_KEY},
-                      "summary":     summary,
-                      "description": description,
-                      "issuetype":   {"name": "Bug"},
-                      "priority":    {"name": priority},
-                      "labels":      ["automated", "robot-framework", "ci-cd"]
-                  }
-              }
-
-              resp = jira_request("POST", "issue", payload)
-              key  = resp.get("key")
-
-              if key:
-                  print(f"  🐛 CRÉÉ   [{priority:<8}] → {key} : {t['name']}")
-                  print(f"             💬 {t['message'][:70]}{'...' if len(t['message']) > 70 else ''}")
+              r = jira("POST", "issue", payload)
+              if r.get("key"):
+                  print(f"  🐛 CRÉÉ [{prio:<6}] → {r['key']} : {t['name']}")
                   created += 1
               else:
-                  print(f"  ❌ ERREUR : {t['name']} — {str(resp.get('error','?'))[:80]}")
+                  print(f"  ❌ ERREUR : {t['name']} — {str(r.get('error','?'))[:60]}")
                   errors += 1
 
-          print("")
-          print("============================================================")
-          print(f"  ✅ Bugs créés   : {created}")
-          print(f"  ⏭️  Ignorés      : {skipped}")
-          if errors > 0:
-              print(f"  ❌ Erreurs      : {errors}")
-          print("============================================================")
+          print(f"\n{'='*60}")
+          print(f"  ✅ Créés: {created}  ⏭️  Ignorés: {skipped}" + (f"  ❌ Erreurs: {errors}" if errors else ""))
+          print(f"{'='*60}")
           PYEOF
 
       - name: Upload Robot Results
