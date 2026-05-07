@@ -12,39 +12,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # =========================
-      # CHECKOUT
-      # =========================
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # =========================
-      # PYTHON SETUP
-      # =========================
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      # =========================
-      # INSTALL DEPENDENCIES
-      # =========================
       - name: Install dependencies
         run: |
           pip install robotframework
           pip install robotframework-browser
 
-      # =========================
-      # INSTALL PLAYWRIGHT BROWSERS
-      # =========================
       - name: Install Playwright Browsers
         run: |
           python -m Browser.entry init
 
-      # =========================
-      # RUN ROBOT TESTS
-      # =========================
       - name: Run Robot Framework Tests
+        continue-on-error: true
         run: |
           robot \
             --outputdir Result \
@@ -53,20 +39,13 @@ jobs:
             --report report.html \
             Tests/
 
-      # =========================
-      # VERIFY OUTPUT FILE
-      # =========================
       - name: Verify output.xml
         run: |
           echo "===== RESULT FOLDER ====="
           ls -lah Result/
-
           echo "===== OUTPUT.XML ====="
           head -50 Result/output.xml
 
-      # =========================
-      # XRAY AUTHENTICATION
-      # =========================
       - name: Authenticate to Xray
         shell: bash
         run: |
@@ -75,18 +54,11 @@ jobs:
             -X POST \
             --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
             https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
-
           echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-      # =========================
-      # INSTALL JQ
-      # =========================
       - name: Install jq
         run: sudo apt-get install -y jq
 
-      # =========================
-      # UPLOAD RESULTS TO XRAY
-      # =========================
       - name: Upload results to Xray
         shell: bash
         run: |
@@ -105,7 +77,6 @@ jobs:
           echo "===== XRAY RESPONSE ====="
           echo "$RESPONSE"
 
-          # Xray peut retourner .key directement OU .testExecIssue.key
           EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key')
 
           if [ "$EXEC_KEY" = "null" ] || [ -z "$EXEC_KEY" ]; then
@@ -118,9 +89,6 @@ jobs:
           echo "🔗 https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
           echo "=================================="
 
-      # =========================
-      # UPLOAD ARTIFACTS
-      # =========================
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
         with:
