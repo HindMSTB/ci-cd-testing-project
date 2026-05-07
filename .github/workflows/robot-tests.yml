@@ -36,19 +36,27 @@ jobs:
       - name: Generate Clean Summary
         shell: bash
         run: |
-          echo "## 🚀 Robot Framework Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Robot Framework Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| PASS | 1 |" >> $GITHUB_STEP_SUMMARY
           echo "| FAIL | 1 |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🧪 Detailed Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Case | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Login Success Case | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
-          echo "| Login Failure Case | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Authenticate to Xray
+        run: |
+          TOKEN=$(curl -H "Content-Type: application/json" -X POST \
+          --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
+          https://xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
+
+          echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+      - name: Upload results to Xray
+        run: |
+          curl -H "Content-Type: text/xml" \
+               -H "Authorization: Bearer $XRAY_TOKEN" \
+               --data @"Result/output.xml" \
+               https://xray.cloud.getxray.app/api/v2/import/execution/robot
 
       - name: Upload Robot Results
         uses: actions/upload-artifact@v4
