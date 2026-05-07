@@ -90,7 +90,7 @@ jobs:
           echo "=================================="
 
       # =============================================
-      # STATISTIQUES — version corrigée Python only
+      # STATISTIQUES
       # =============================================
       - name: Afficher statistiques des tests
         if: always()
@@ -103,7 +103,6 @@ jobs:
 
               total = passed = failed = skipped = 0
 
-              # Méthode 1 : noeud statistics
               for stat in root.iter('stat'):
                   name = stat.get('name', '') or (stat.text or '')
                   if 'All Tests' in name or name.strip() == '':
@@ -115,7 +114,6 @@ jobs:
                           total = passed + failed + skipped
                           break
 
-              # Méthode 2 : compter manuellement si stats vides
               if total == 0:
                   for test in root.iter('test'):
                       status = test.find('status')
@@ -145,12 +143,20 @@ jobs:
               print("           ❌ TESTS ÉCHOUÉS                     ")
               print("================================================")
 
+              def get_msg(test, status):
+                  msg = status.get('message', '').strip()
+                  if msg: return msg
+                  for el in test.iter('msg'):
+                      if el.get('level') in ('FAIL','ERROR') and el.text:
+                          return el.text.strip()
+                  return 'Pas de message'
+
               failed_tests = []
               for test in root.iter('test'):
                   status = test.find('status')
                   if status is not None and status.get('status') == 'FAIL':
                       name = test.get('name', 'Inconnu')
-                      message = status.get('message', 'Pas de message')
+                      message = get_msg(test, status)
                       failed_tests.append((name, message))
 
               if failed_tests:
@@ -218,7 +224,7 @@ jobs:
           }
 
           def jira_request(method, path, data=None):
-              url = f"{JIRA_BASE_URL}/rest/api/3/{path}"
+              url  = f"{JIRA_BASE_URL}/rest/api/3/{path}"
               body = json.dumps(data).encode() if data else None
               req  = urllib.request.Request(url, data=body, headers=headers, method=method)
               try:
@@ -235,14 +241,33 @@ jobs:
                   return "Medium"
               return "Low"
 
-          def bug_exists(summary):
-              jql   = f'project={PROJECT_KEY} AND issuetype=Bug AND summary~"{summary}" AND statusCategory != Done'
-              enc   = urllib.request.quote(jql)
-              resp  = jira_request("GET", f"search?jql={enc}&maxResults=1&fields=summary")
+          def bug_exists(test_name):
+              safe = test_name.replace('"', '\\"')
+              jql  = f'project={PROJECT_KEY} AND issuetype=Bug AND summary~"[Robot] {safe}" AND statusCategory != Done'
+              enc  = urllib.request.quote(jql)
+              resp = jira_request("GET", f"search?jql={enc}&maxResults=1&fields=summary")
               total = resp.get("total", 0)
               if total > 0:
                   return resp["issues"][0]["key"]
               return None
+
+          def get_error_message(test, status):
+              # 1. Attribut message du noeud status
+              msg = status.get('message', '').strip()
+              if msg:
+                  return msg
+              # 2. Noeuds <msg> avec level FAIL ou ERROR dans le test
+              for msg_el in test.iter('msg'):
+                  if msg_el.get('level') in ('FAIL', 'ERROR') and msg_el.text:
+                      return msg_el.text.strip()
+              # 3. Message dans keyword échoué
+              for kw in test.iter('kw'):
+                  kw_status = kw.find('status')
+                  if kw_status is not None and kw_status.get('status') == 'FAIL':
+                      for msg_el in kw.iter('msg'):
+                          if msg_el.text:
+                              return msg_el.text.strip()
+              return 'Aucun message disponible'
 
           # Lire les tests échoués
           try:
@@ -256,9 +281,10 @@ jobs:
           for test in root.iter("test"):
               status = test.find("status")
               if status is not None and status.get("status") == "FAIL":
+                  message = get_error_message(test, status)
                   failed_tests.append({
                       "name":    test.get("name", "Inconnu"),
-                      "message": status.get("message", "Pas de message")
+                      "message": message
                   })
 
           if not failed_tests:
@@ -271,7 +297,7 @@ jobs:
           print("============================================================")
           print("")
 
-          created = skipped = 0
+          created = skipped = errors = 0
 
           for t in failed_tests:
               summary  = f"[Robot] {t['name']}"
@@ -286,18 +312,12 @@ jobs:
               description = {
                   "version": 1,
                   "type": "doc",
-                  "content": [{
-                      "type": "paragraph",
-                      "content": [{
-                          "type": "text",
-                          "text": (
-                              f"Bug détecté automatiquement par le pipeline CI.\n\n"
-                              f"Test échoué : {t['name']}\n"
-                              f"Message d'erreur : {t['message']}\n\n"
-                              f"🔗 GitHub Actions Run : {RUN_URL}"
-                          )
-                      }]
-                  }]
+                  "content": [
+                      {"type": "paragraph", "content": [{"type": "text", "text": "🤖 Bug détecté automatiquement par le pipeline CI/CD Robot Framework."}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"📋 Test échoué : {t['name']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"❌ Message d'erreur : {t['message']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"🔗 GitHub Actions Run : {RUN_URL}"}]}
+                  ]
               }
 
               payload = {
@@ -316,14 +336,18 @@ jobs:
 
               if key:
                   print(f"  🐛 CRÉÉ   [{priority:<8}] → {key} : {t['name']}")
+                  print(f"             💬 {t['message'][:70]}{'...' if len(t['message']) > 70 else ''}")
                   created += 1
               else:
-                  print(f"  ❌ ERREUR : {t['name']} — {resp.get('error','?')}")
+                  print(f"  ❌ ERREUR : {t['name']} — {str(resp.get('error','?'))[:80]}")
+                  errors += 1
 
           print("")
           print("============================================================")
           print(f"  ✅ Bugs créés   : {created}")
           print(f"  ⏭️  Ignorés      : {skipped}")
+          if errors > 0:
+              print(f"  ❌ Erreurs      : {errors}")
           print("============================================================")
           PYEOF
 
