@@ -29,25 +29,27 @@ jobs:
         run: |
           python -m Browser.entry init
 
-      # ⚠️ FIX IMPORTANT: enlever || true pour voir les vrais erreurs
+      # =========================
+      # RUN TESTS
+      # =========================
       - name: Run Robot Framework Tests
         run: |
           robot -d Result Tests/
 
       # =========================
-      # XRAY AUTH
+      # XRAY AUTH (EU REGION)
       # =========================
       - name: Authenticate to Xray
         shell: bash
         run: |
           TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
             --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
-            https://xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
+            https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
 
           echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       # =========================
-      # XRAY UPLOAD (CORRECT)
+      # XRAY UPLOAD (EU REGION FIXED)
       # =========================
       - name: Upload results to Xray
         shell: bash
@@ -55,7 +57,7 @@ jobs:
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $XRAY_TOKEN" \
             -F "file=@Result/output.xml" \
-            "https://xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
+            "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
 
           echo "$RESPONSE"
 
