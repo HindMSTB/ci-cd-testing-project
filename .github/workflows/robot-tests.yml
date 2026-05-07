@@ -39,13 +39,6 @@ jobs:
             --report report.html \
             Tests/
 
-      - name: Verify output.xml
-        run: |
-          echo "===== RESULT FOLDER ====="
-          ls -lah Result/
-          echo "===== OUTPUT.XML ====="
-          head -50 Result/output.xml
-
       - name: Authenticate to Xray
         shell: bash
         run: |
@@ -96,7 +89,6 @@ jobs:
           echo "           📊 RAPPORT DES TESTS                 "
           echo "================================================"
 
-          # Extraire stats depuis output.xml
           TOTAL=$(grep -oP 'tests="\K[0-9]+' Result/output.xml | head -1 || echo "0")
           PASSED=$(grep -oP 'pass="\K[0-9]+' Result/output.xml | head -1 || echo "0")
           FAILED=$(grep -oP 'fail="\K[0-9]+' Result/output.xml | head -1 || echo "0")
@@ -117,15 +109,11 @@ jobs:
           echo "           ❌ TESTS ÉCHOUÉS                     "
           echo "================================================"
 
-          # Extraire les tests échoués
           python3 - <<'PYEOF'
           import xml.etree.ElementTree as ET
-          import sys
-
           try:
               tree = ET.parse('Result/output.xml')
               root = tree.getroot()
-
               failed_tests = []
               for test in root.iter('test'):
                   status = test.find('status')
@@ -133,18 +121,16 @@ jobs:
                       name = test.get('name', 'Inconnu')
                       message = status.get('message', 'Pas de message')
                       failed_tests.append((name, message))
-
               if failed_tests:
-                  print(f"{'Nom du test':<45} {'Message d erreur'}")
+                  print(f"{'Nom du test':<45} {'Message erreur'}")
                   print("-" * 90)
                   for name, msg in failed_tests:
                       short_msg = msg[:40] + "..." if len(msg) > 40 else msg
                       print(f"{name:<45} {short_msg}")
               else:
                   print("✅ Aucun test échoué !")
-
           except Exception as e:
-              print(f"Erreur lecture XML: {e}")
+              print(f"Erreur: {e}")
           PYEOF
 
           echo ""
@@ -154,34 +140,27 @@ jobs:
 
           python3 - <<'PYEOF'
           import xml.etree.ElementTree as ET
-
           try:
               tree = ET.parse('Result/output.xml')
               root = tree.getroot()
-
               passed_tests = []
               for test in root.iter('test'):
                   status = test.find('status')
                   if status is not None and status.get('status') == 'PASS':
                       name = test.get('name', 'Inconnu')
                       passed_tests.append(name)
-
               if passed_tests:
                   for i, name in enumerate(passed_tests, 1):
                       print(f"  {i:>2}. ✅ {name}")
               else:
                   print("❌ Aucun test réussi.")
-
           except Exception as e:
-              print(f"Erreur lecture XML: {e}")
+              print(f"Erreur: {e}")
           PYEOF
 
           echo ""
           echo "================================================"
-          echo "   Artifacts disponibles : Result/"
-          echo "     - output.xml"
-          echo "     - log.html"
-          echo "     - report.html"
+          echo "  📦 Artifacts : output.xml | log.html | report.html"
           echo "================================================"
 
       - name: Upload Robot Results

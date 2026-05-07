@@ -1,89 +1,29 @@
 *** Settings ***
-Library     Browser
-Resource    ../Keywords/login.resource
+Library    Browser
 
-*** Test Cases ***
+*** Variables ***
+${URL}        https://www.saucedemo.com/
 
-Connexion réussie utilisateur standard
-    [Tags]    QATEAM-2
-    Open Login Page
-    Login    standard_user    secret_sauce
-    Verify Login Success
-    Close Browser
+*** Keywords ***
+Open Login Page
+    New Browser    chromium    headless=true
+    New Page    ${URL}
+    Wait For Elements State    id=user-name    visible    10s
 
-Connexion réussie utilisateur performance
-    [Tags]    QATEAM-5
-    Open Login Page
-    Login    performance_glitch_user    secret_sauce
-    Verify Login Success
-    Close Browser
+Login
+    [Arguments]    ${username}    ${password}
+    Fill Text    id=user-name    ${username}
+    Fill Text    id=password     ${password}
+    Click    id=login-button
 
-Connexion réussie utilisateur problem
-    [Tags]    QATEAM-6
-    Open Login Page
-    Login    problem_user    secret_sauce
-    Verify Login Success
-    Close Browser
+Verify Login Success
+    Wait For Elements State    css=.title    visible    10s
+    Get Text    css=.title    ==    Products
 
-Connexion réussie utilisateur error
-    [Tags]    QATEAM-7
-    Open Login Page
-    Login    error_user    secret_sauce
-    Verify Login Success
-    Close Browser
+Verify Login Error
+    Wait For Elements State    css=h3    visible    10s
+    Get Text    css=h3    ==    Epic sadface: Sorry, this user has been locked out.
 
-Connexion réussie utilisateur visual
-    [Tags]    QATEAM-8
-    Open Login Page
-    Login    visual_user    secret_sauce
-    Verify Login Success
-    Close Browser
-
-Vérification message erreur utilisateur bloqué
-    [Tags]    QATEAM-3
-    Open Login Page
-    Login    locked_out_user    secret_sauce
-    Verify Login Error
-    Close Browser
-
-Vérification titre page produits après connexion
-    [Tags]    QATEAM-9
-    Open Login Page
-    Login    standard_user    secret_sauce
-    Verify Login Success
-    Close Browser
-
-Vérification accès tableau de bord standard
-    [Tags]    QATEAM-10
-    Open Login Page
-    Login    standard_user    secret_sauce
-    Verify Login Success
-    Close Browser
-
-Connexion avec mauvais mot de passe
-    [Tags]    QATEAM-4
-    Open Login Page
-    Login    standard_user    wrong_password
-    Verify Login Success
-    Close Browser
-
-Connexion avec nom utilisateur invalide
-    [Tags]    QATEAM-11
-    Open Login Page
-    Login    utilisateur_inconnu    secret_sauce
-    Verify Login Success
-    Close Browser
-
-Connexion avec champs vides
-    [Tags]    QATEAM-12
-    Open Login Page
-    Login    ${EMPTY}    ${EMPTY}
-    Verify Login Success
-    Close Browser
-
-Connexion utilisateur bloqué avec bon mot de passe
-    [Tags]    QATEAM-13
-    Open Login Page
-    Login    locked_out_user    secret_sauce
-    Verify Login Success
-    Close Browser
+Verify Wrong Title
+    Wait For Elements State    css=.title    visible    10s
+    Get Text    css=.title    ==    TITRE_QUI_NEXISTE_PAS

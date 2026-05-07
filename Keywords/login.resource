@@ -23,3 +23,7 @@ Verify Login Success
 Verify Login Error
     Wait For Elements State    css=h3    visible    10s
     Get Text    css=h3    ==    Epic sadface: Sorry, this user has been locked out.
+
+Verify Wrong Title
+    Wait For Elements State    css=.title    visible    10s
+    Get Text    css=.title    ==    TITRE_QUI_NEXISTE_PAS
