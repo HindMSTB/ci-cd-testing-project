@@ -6,7 +6,7 @@ on:
       - main
   pull_request:
   schedule:
-    - cron: '0 8 * * 5'   # Vendredi 9h Maroc
+    - cron: '0 8 * * 5'   # Vendredi 9h Maroc (UTC+1 = 8h UTC)
 
 jobs:
   robot-tests:
@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           if [ ! -f Result/output.xml ]; then
-            echo "❌ output.xml not found"
+            echo "output.xml not found"
             exit 1
           fi
 
@@ -64,37 +64,37 @@ jobs:
             --data @"Result/output.xml" \
             "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=QATEAM")
 
-          echo "===== XRAY RESPONSE ====="
           echo "$RESPONSE"
 
           EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key')
 
           if [ "$EXEC_KEY" = "null" ] || [ -z "$EXEC_KEY" ]; then
-            echo "❌ Failed to create Test Execution"
+            echo "Failed to create Test Execution"
             exit 1
           fi
 
-          echo "=================================="
-          echo "✅ Test Execution Created: $EXEC_KEY"
-          echo "🔗 https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
-          echo "=================================="
+          echo "Test Execution Created: $EXEC_KEY"
+          echo "https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
+          echo "EXEC_KEY=$EXEC_KEY" >> $GITHUB_ENV
 
-      - name: Créer bugs Jira pour tests échoués
+      - name: Creer bugs Jira pour tests echoues
         if: always()
         env:
           JIRA_USER:      ${{ secrets.JIRA_USER }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_BASE_URL:  https://hindmoustainbillah29.atlassian.net
           PROJECT_KEY:    QATEAM
+          EXEC_KEY:       ${{ env.EXEC_KEY }}
         run: |
           python3 - <<'PYEOF'
           import xml.etree.ElementTree as ET, json, os, urllib.request, urllib.error, base64
 
-          USER  = os.environ["JIRA_USER"]
-          TOKEN = os.environ["JIRA_API_TOKEN"]
-          BASE  = os.environ["JIRA_BASE_URL"]
-          PROJ  = os.environ["PROJECT_KEY"]
-          RUN   = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
+          USER     = os.environ["JIRA_USER"]
+          TOKEN    = os.environ["JIRA_API_TOKEN"]
+          BASE     = os.environ["JIRA_BASE_URL"]
+          PROJ     = os.environ["PROJECT_KEY"]
+          EXEC_KEY = os.environ.get("EXEC_KEY", "")
+          RUN      = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
 
           creds   = base64.b64encode(f"{USER}:{TOKEN}".encode()).decode()
           headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json", "Accept": "application/json"}
@@ -116,11 +116,25 @@ jobs:
               if any(k in m for k in ["assert","expected","found","not found"]): return "Medium"
               return "Low"
 
-          def bug_exists(name):
-              safe = name.replace('"', '\\"')
-              jql  = urllib.request.quote(f'project={PROJ} AND issuetype=Bug AND summary~"[Robot] {safe}" AND statusCategory != Done')
+          def bug_exists(summary):
+              # Recherche exacte par summary pour eviter les doublons
+              safe = summary.replace("\\", "\\\\").replace('"', '\\"')
+              jql  = urllib.request.quote(f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
               r    = jira("GET", f"search?jql={jql}&maxResults=1&fields=summary")
-              return r["issues"][0]["key"] if r.get("total", 0) > 0 else None
+              if r.get("total", 0) > 0:
+                  return r["issues"][0]["key"]
+              return None
+
+          def link_bug_to_execution(bug_key):
+              # Lier le bug au Test Execution dans Jira
+              if not EXEC_KEY:
+                  return
+              payload = {
+                  "type": {"name": "Blocks"},
+                  "inwardIssue": {"key": bug_key},
+                  "outwardIssue": {"key": EXEC_KEY}
+              }
+              jira("POST", "issueLink", payload)
 
           def get_msg(test, st):
               msg = st.get('message', '').strip()
@@ -137,7 +151,7 @@ jobs:
           try:
               root = ET.parse("Result/output.xml").getroot()
           except Exception as e:
-              print(f"❌ {e}"); exit(0)
+              print(f"Erreur: {e}"); exit(0)
 
           fails = []
           for test in root.iter("test"):
@@ -146,43 +160,49 @@ jobs:
                   fails.append({"name": test.get("name","?"), "msg": get_msg(test, st)})
 
           if not fails:
-              print("✅ Aucun test échoué — pas de bug à créer."); exit(0)
+              print("Aucun test echoue - pas de bug a creer."); exit(0)
 
-          print(f"\n{'='*60}\n  🐛 BUGS JIRA\n{'='*60}\n")
+          print(f"\n{'='*60}\nBUGS JIRA\n{'='*60}\n")
           created = skipped = errors = 0
 
           for t in fails:
-              key = bug_exists(t["name"])
+              summary = f"[Robot] {t['name']}"
+              key     = bug_exists(summary)
+
               if key:
-                  print(f"  ⏭️  SKIP (déjà ouvert → {key}) : {t['name']}")
+                  print(f"  SKIP (deja ouvert -> {key}) : {t['name']}")
+                  # Lier quand meme le bug existant au nouveau Test Execution
+                  link_bug_to_execution(key)
                   skipped += 1
                   continue
 
               prio    = priority(t["msg"])
               payload = {"fields": {
                   "project":     {"key": PROJ},
-                  "summary":     f"[Robot] {t['name']}",
+                  "summary":     summary,
                   "issuetype":   {"name": "Bug"},
                   "priority":    {"name": prio},
                   "labels":      ["automated", "robot-framework", "ci-cd"],
                   "description": {"version": 1, "type": "doc", "content": [
-                      {"type": "paragraph", "content": [{"type": "text", "text": "🤖 Bug CI/CD Robot Framework"}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"📋 Test : {t['name']}"}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"❌ Erreur : {t['msg']}"}]},
-                      {"type": "paragraph", "content": [{"type": "text", "text": f"🔗 Run : {RUN}"}]}
+                      {"type": "paragraph", "content": [{"type": "text", "text": "Bug CI/CD Robot Framework"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"Test : {t['name']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"Erreur : {t['msg']}"}]},
+                      {"type": "paragraph", "content": [{"type": "text", "text": f"Run : {RUN}"}]}
                   ]}
               }}
 
               r = jira("POST", "issue", payload)
               if r.get("key"):
-                  print(f"  🐛 CRÉÉ [{prio:<6}] → {r['key']} : {t['name']}")
+                  new_key = r["key"]
+                  print(f"  CREE [{prio:<6}] -> {new_key} : {t['name']}")
+                  link_bug_to_execution(new_key)
                   created += 1
               else:
-                  print(f"  ❌ ERREUR : {t['name']} — {str(r.get('error','?'))[:60]}")
+                  print(f"  ERREUR : {t['name']} -- {str(r.get('error','?'))[:60]}")
                   errors += 1
 
           print(f"\n{'='*60}")
-          print(f"  ✅ Créés: {created}  ⏭️  Ignorés: {skipped}" + (f"  ❌ Erreurs: {errors}" if errors else ""))
+          print(f"  Crees: {created}  Ignores: {skipped}" + (f"  Erreurs: {errors}" if errors else ""))
           print(f"{'='*60}")
           PYEOF
 
