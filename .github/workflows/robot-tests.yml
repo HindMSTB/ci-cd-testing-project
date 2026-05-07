@@ -105,9 +105,10 @@ jobs:
           echo "===== XRAY RESPONSE ====="
           echo "$RESPONSE"
 
-          EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key')
+          # Xray peut retourner .key directement OU .testExecIssue.key
+          EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key')
 
-          if [ "$EXEC_KEY" = "null" ]; then
+          if [ "$EXEC_KEY" = "null" ] || [ -z "$EXEC_KEY" ]; then
             echo "❌ Failed to create Test Execution"
             exit 1
           fi
