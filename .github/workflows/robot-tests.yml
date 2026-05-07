@@ -58,7 +58,7 @@ jobs:
         run: |
           TOKEN=$(curl -H "Content-Type: application/json" -X POST \
           --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
-          https://us.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
+          https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
 
           echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
@@ -66,12 +66,6 @@ jobs:
         run: |
           RESPONSE=$(curl -H "Authorization: Bearer $XRAY_TOKEN" \
                -F "file=@Result/output.xml" \
-               "https://us.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
+               "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
 
-          echo "$RESPONSE"
-
-      - name: Upload Robot Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: robot-results
-          path: Result/
+      
