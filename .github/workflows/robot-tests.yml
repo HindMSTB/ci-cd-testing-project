@@ -1,97 +1,104 @@
 name: Robot Framework CI
 
 on:
-push:
-branches:
-- main
+  push:
+    branches:
+      - main
 
-pull_request:
+  pull_request:
 
 jobs:
-robot-tests:
-runs-on: ubuntu-latest
+  robot-tests:
+    runs-on: ubuntu-latest
 
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-steps:
-  # =========================
-  # CHECKOUT
-  # =========================
-  - name: Checkout repository
-    uses: actions/checkout@v4
+      # =========================
+      # PYTHON SETUP
+      # =========================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
-  # =========================
-  # PYTHON SETUP
-  # =========================
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.11'
+      # =========================
+      # INSTALL DEPENDENCIES
+      # =========================
+      - name: Install dependencies
+        run: |
+          pip install robotframework
+          pip install robotframework-browser
 
-  # =========================
-  # INSTALL DEPENDENCIES
-  # =========================
-  - name: Install dependencies
-    run: |
-      pip install robotframework
-      pip install robotframework-browser
+      # =========================
+      # INSTALL BROWSERS
+      # =========================
+      - name: Install Playwright Browsers
+        run: |
+          python -m Browser.entry init
 
-  # =========================
-  # INSTALL BROWSERS
-  # =========================
-  - name: Install Playwright Browsers
-    run: |
-      rfbrowser init
+      # =========================
+      # RUN ROBOT TESTS (IMPORTANT FIX)
+      # =========================
+      - name: Run Robot Framework Tests
+        run: |
+          robot \
+            --outputdir Result \
+            --output output.xml \
+            --log log.html \
+            --report report.html \
+            Tests/
 
-  # =========================
-  # RUN ROBOT TESTS
-  # =========================
-  - name: Run Robot Framework Tests
-    run: |
-      robot --outputdir Result Tests/
+      # =========================
+      # CHECK OUTPUT FILE
+      # =========================
+      - name: Verify output.xml
+        run: |
+          ls -lah Result/
+          head -50 Result/output.xml
 
-  # =========================
-  # VERIFY XML
-  # =========================
-  - name: Verify output.xml
-    run: |
-      ls -lah Result/
-      echo "===== XML START ====="
-      head -20 Result/output.xml
-      echo "===== XML SIZE ====="
-      wc -c Result/output.xml
+      # =========================
+      # XRAY AUTH (EU REGION)
+      # =========================
+      - name: Authenticate to Xray
+        shell: bash
+        run: |
+          TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+            --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
+            https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
 
-  # =========================
-  # XRAY AUTH
-  # =========================
-  - name: Authenticate to Xray
-    shell: bash
-    run: |
-      TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
-        --data "{\"client_id\":\"${{ secrets.XRAY_CLIENT_ID }}\",\"client_secret\":\"${{ secrets.XRAY_CLIENT_SECRET }}\"}" \
-        https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
+          echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-      echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
+      # =========================
+      # XRAY UPLOAD (FIXED)
+      # =========================
+      - name: Upload results to Xray
+        shell: bash
+        run: |
+          if [ ! -f Result/output.xml ]; then
+            echo "❌ output.xml not found"
+            exit 1
+          fi
 
-  # =========================
-  # XRAY UPLOAD
-  # =========================
-  - name: Upload results to Xray
-    shell: bash
-    run: |
-      RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bearer $XRAY_TOKEN" \
-        -F "file=@Result/output.xml;type=text/xml" \
-        "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $XRAY_TOKEN" \
+            -F "file=@Result/output.xml" \
+            "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=SCRUM")
 
-      echo "===== XRAY RESPONSE ====="
-      echo "$RESPONSE"
+          echo "===== XRAY RESPONSE ====="
+          echo "$RESPONSE"
 
-  # =========================
-  # ARTIFACTS
-  # =========================
-  - name: Upload Robot Results
-    uses: actions/upload-artifact@v4
-    with:
-      name: robot-results
-      path: Result/
-    
+      # =========================
+      # ARTIFACTS
+      # =========================
+      - name: Upload Robot Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-results
+          path: Result/
+
+         
