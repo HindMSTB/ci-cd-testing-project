@@ -6,26 +6,47 @@ on:
       - main
   pull_request:
   schedule:
-    - cron: '0 8 * * 5'   # Vendredi 9h Maroc (UTC+1 = 8h UTC)
+    - cron: '0 8 * * 5'   # Declenchement automatique chaque vendredi a 9h (Maroc, UTC+1)
 
 jobs:
   robot-tests:
     runs-on: ubuntu-latest
+    env:
+      # Forcer Node.js 24 pour eviter les warnings de deprecation des actions GitHub
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      # ------------------------------------------------------------------
+      # 1. RECUPERATION DU CODE SOURCE
+      # ------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------------
+      # 2. INSTALLATION DE PYTHON
+      # ------------------------------------------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
+      # ------------------------------------------------------------------
+      # 3. INSTALLATION DES DEPENDANCES
+      #    - robotframework         : framework de tests
+      #    - robotframework-browser : librairie Playwright pour les tests UI
+      #    - Browser.entry init     : telechargement des navigateurs Playwright
+      # ------------------------------------------------------------------
       - name: Install dependencies
         run: |
           pip install robotframework robotframework-browser
           python -m Browser.entry init
 
+      # ------------------------------------------------------------------
+      # 4. EXECUTION DES TESTS ROBOT FRAMEWORK
+      #    continue-on-error: true => le pipeline continue meme si des tests echouent
+      #    (exit code 1 a 5 sont normaux quand des tests sont en echec)
+      #    Les resultats sont sauvegardes dans le dossier Result/
+      # ------------------------------------------------------------------
       - name: Run Robot Framework Tests
         continue-on-error: true
         run: |
@@ -36,6 +57,11 @@ jobs:
             --report report.html \
             Tests/
 
+      # ------------------------------------------------------------------
+      # 5. AUTHENTIFICATION XRAY
+      #    Recupere un token JWT depuis l'API Xray Cloud
+      #    Le token est stocke dans la variable d'environnement XRAY_TOKEN
+      # ------------------------------------------------------------------
       - name: Authenticate to Xray
         shell: bash
         run: |
@@ -46,9 +72,19 @@ jobs:
             https://eu.xray.cloud.getxray.app/api/v2/authenticate | tr -d '"')
           echo "XRAY_TOKEN=$TOKEN" >> $GITHUB_ENV
 
+      # ------------------------------------------------------------------
+      # 6. INSTALLATION DE JQ
+      #    Outil de parsing JSON utilise pour extraire la cle d'execution Xray
+      # ------------------------------------------------------------------
       - name: Install jq
         run: sudo apt-get install -y jq
 
+      # ------------------------------------------------------------------
+      # 7. ENVOI DES RESULTATS VERS XRAY
+      #    - Envoie le fichier output.xml a l'API Xray
+      #    - Cree une Test Execution dans le projet QATEAM
+      #    - Stocke la cle d'execution (ex: QATEAM-34) dans EXEC_KEY
+      # ------------------------------------------------------------------
       - name: Upload results to Xray
         shell: bash
         run: |
@@ -64,8 +100,11 @@ jobs:
             --data @"Result/output.xml" \
             "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=QATEAM")
 
+          echo "===== XRAY RESPONSE ====="
           echo "$RESPONSE"
+          echo "=================================="
 
+          # Extraction de la cle de l'execution creee
           EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key')
 
           if [ "$EXEC_KEY" = "null" ] || [ -z "$EXEC_KEY" ]; then
@@ -75,8 +114,22 @@ jobs:
 
           echo "Test Execution Created: $EXEC_KEY"
           echo "https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
+          echo "=================================="
+
+          # Exposition de la cle pour les etapes suivantes
           echo "EXEC_KEY=$EXEC_KEY" >> $GITHUB_ENV
 
+      # ------------------------------------------------------------------
+      # 8. CREATION AUTOMATIQUE DE BUGS JIRA
+      #    if: always() => s'execute meme si une etape precedente a echoue
+      #    - Parse output.xml pour identifier les tests en echec
+      #    - Pour chaque echec : verifie si un bug existe deja (evite les doublons)
+      #    - Cree le bug avec priorite automatique selon le type d'erreur :
+      #        High   : timeout, crash, connection
+      #        Medium : assertion, valeur attendue/trouvee
+      #        Low    : autres erreurs
+      #    - Lie chaque bug a la Test Execution Xray via un lien "Blocks"
+      # ------------------------------------------------------------------
       - name: Creer bugs Jira pour tests echoues
         if: always()
         env:
@@ -89,6 +142,7 @@ jobs:
           python3 - <<'PYEOF'
           import xml.etree.ElementTree as ET, json, os, urllib.request, urllib.error, base64
 
+          # Recuperation des variables d'environnement
           USER     = os.environ["JIRA_USER"]
           TOKEN    = os.environ["JIRA_API_TOKEN"]
           BASE     = os.environ["JIRA_BASE_URL"]
@@ -96,9 +150,11 @@ jobs:
           EXEC_KEY = os.environ.get("EXEC_KEY", "")
           RUN      = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
 
+          # Encodage des credentials en Base64 pour l'authentification Basic
           creds   = base64.b64encode(f"{USER}:{TOKEN}".encode()).decode()
           headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json", "Accept": "application/json"}
 
+          # Fonction generique d'appel a l'API Jira REST v3
           def jira(method, path, data=None):
               req = urllib.request.Request(
                   f"{BASE}/rest/api/3/{path}",
@@ -112,18 +168,21 @@ jobs:
                   body = e.read().decode()
                   return {"error": body} if body.strip() else {"error": f"HTTP {e.code}"}
 
+          # Determination de la priorite du bug selon le message d'erreur
           def priority(msg):
               m = msg.lower()
               if any(k in m for k in ["critical","crash","timeout","connection"]): return "High"
               if any(k in m for k in ["assert","expected","found","not found"]): return "Medium"
               return "Low"
 
+          # Verification si un bug avec le meme titre est deja ouvert (evite les doublons)
           def bug_exists(summary):
               safe = summary.replace("\\", "\\\\").replace('"', '\\"')
               jql  = urllib.request.quote(f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
               r    = jira("GET", f"search?jql={jql}&maxResults=1&fields=summary")
               return r["issues"][0]["key"] if r.get("total", 0) > 0 else None
 
+          # Liaison du bug cree a la Test Execution Xray via un lien "Blocks"
           def link_bug_to_execution(bug_key):
               if not EXEC_KEY:
                   return
@@ -138,11 +197,14 @@ jobs:
               else:
                   print(f"    Lie a {EXEC_KEY}")
 
+          # Extraction du message d'erreur depuis le noeud XML du test
           def get_msg(test, st):
               msg = st.get('message', '').strip()
               if msg: return msg
+              # Recherche dans les messages de niveau FAIL ou ERROR
               for el in test.iter('msg'):
                   if el.get('level') in ('FAIL','ERROR') and el.text: return el.text.strip()
+              # Recherche dans les keywords en echec
               for kw in test.iter('kw'):
                   kst = kw.find('status')
                   if kst is not None and kst.get('status') == 'FAIL':
@@ -150,11 +212,13 @@ jobs:
                           if el.text: return el.text.strip()
               return 'Aucun message'
 
+          # Lecture et parsing du fichier de resultats Robot Framework
           try:
               root = ET.parse("Result/output.xml").getroot()
           except Exception as e:
               print(f"Erreur: {e}"); exit(0)
 
+          # Collecte de tous les tests en echec
           fails = []
           for test in root.iter("test"):
               st = test.find("status")
@@ -164,19 +228,24 @@ jobs:
           if not fails:
               print("Aucun test echoue - pas de bug a creer."); exit(0)
 
-          print(f"\n{'='*60}\nBUGS JIRA\n{'='*60}\n")
+          print(f"\n{'='*60}")
+          print(f"  BUGS JIRA")
+          print(f"{'='*60}\n")
           created = skipped = errors = 0
 
+          # Traitement de chaque test en echec
           for t in fails:
               summary = f"[Robot] {t['name']}"
               key     = bug_exists(summary)
 
+              # Si le bug existe deja, on le lie a l'execution sans le recreer
               if key:
                   print(f"  SKIP (deja ouvert -> {key}) : {t['name']}")
                   link_bug_to_execution(key)
                   skipped += 1
                   continue
 
+              # Creation du bug avec description structuree en format Atlassian Document
               prio    = priority(t["msg"])
               payload = {"fields": {
                   "project":     {"key": PROJ},
@@ -202,11 +271,17 @@ jobs:
                   print(f"  ERREUR : {t['name']} -- {str(r.get('error','?'))[:60]}")
                   errors += 1
 
+          # Resume final
           print(f"\n{'='*60}")
           print(f"  Crees: {created}  Ignores: {skipped}" + (f"  Erreurs: {errors}" if errors else ""))
           print(f"{'='*60}")
           PYEOF
 
+      # ------------------------------------------------------------------
+      # 9. SAUVEGARDE DES ARTEFACTS
+      #    if: always() => sauvegarde les resultats meme en cas d'echec
+      #    Contient : output.xml, log.html, report.html
+      # ------------------------------------------------------------------
       - name: Upload Robot Results
         if: always()
         uses: actions/upload-artifact@v4
