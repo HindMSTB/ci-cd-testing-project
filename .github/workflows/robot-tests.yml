@@ -69,15 +69,24 @@ jobs:
       # 5. EXECUTION DES TESTS ROBOT FRAMEWORK
       # ------------------------------------------------------------------
       - name: Run Robot Framework Tests
-        continue-on-error: true
         run: |
+          # Exit codes Robot Framework :
+          #   0 = tous passes, 1-4 = erreurs graves, 5 = certains tests echoues (normal)
+          # On capture le code retour pour ne pas faire echouer le step sur un exit 5.
           robot \
             --outputdir Result \
             --output output.xml \
             --log log.html \
             --report report.html \
             --variable BROWSER:chromium \
-            Tests/
+            Tests/ || EXIT_CODE=$?
+          if [ "${EXIT_CODE:-0}" -le 5 ]; then
+            echo "Robot termine avec exit code ${EXIT_CODE:-0} (normal)"
+            exit 0
+          else
+            echo "Erreur critique Robot Framework (exit code ${EXIT_CODE})"
+            exit ${EXIT_CODE}
+          fi
 
       # ------------------------------------------------------------------
       # 6. LISTE DES SCREENSHOTS CAPTURES
@@ -131,7 +140,15 @@ jobs:
           PASSED=$(grep -o 'status="PASS"' Result/output.xml | wc -l)
           FAILED=$(grep -o 'status="FAIL"' Result/output.xml | wc -l)
 
-          DESC="Projet : ${{ env.ROBOT_PROJECT_NAME }} | ${TRIGGER} | Branche : ${BRANCH} | Date : ${EXEC_DATE} | Tests : ${PASSED} passes / ${FAILED} echoues / ${TOTAL} total | Run : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Description lisible de la Test Execution (visible dans Jira)
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            TRIGGER_DESC="planifiee automatiquement"
+          elif [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            TRIGGER_DESC="declenchee par une Pull Request"
+          else
+            TRIGGER_DESC="declenchee manuellement (Push)"
+          fi
+          DESC="Cette execution de tests a ete ${TRIGGER_DESC} le ${EXEC_DATE} sur la branche ${BRANCH}. Projet : ${{ env.ROBOT_PROJECT_NAME }}. Resultats : ${PASSED} tests passes, ${FAILED} tests echoues sur ${TOTAL} au total."
 
           # Le champ info doit etre envoye comme fichier (@) pour que
           # curl definisse le bon Content-Type de la partie multipart
@@ -308,12 +325,17 @@ jobs:
               return "Low"
 
           # ── Anti-doublon ───────────────────────────────────────────────
+          # Retourne la cle du bug si un bug OUVERT (non ferme) existe deja.
+          # Si le bug existe mais est ferme (Done), retourne None => recreation.
           def bug_exists(summary):
               safe = summary.replace("\\", "\\\\").replace('"', '\\"')
-              jql  = urllib.request.quote(
+              # Cherche uniquement parmi les bugs NON fermes
+              jql_open = urllib.request.quote(
                   f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
-              r = jira("GET", f"search?jql={jql}&maxResults=1&fields=summary")
-              return r["issues"][0]["key"] if r.get("total", 0) > 0 else None
+              r = jira("GET", f"search?jql={jql_open}&maxResults=1&fields=summary,status")
+              if r.get("total", 0) > 0:
+                  return r["issues"][0]["key"]   # Bug ouvert => ne pas recreer
+              return None                         # Absent ou ferme => creer
 
           # ── Lien bug <-> Test Execution ────────────────────────────────
           def link_to_execution(bug_key):
@@ -549,7 +571,7 @@ jobs:
               content.append(rule())
 
               # 2. Erreur detectee (message reformule + detail technique si plusieurs lignes)
-              content.append(heading("Erreur detectee", 3))
+              content.append(heading("Bug detecte", 3))
               for line in human_error(error, test_name).split("\n"):
                   if line.strip():
                       content.append(para(line.strip()))
