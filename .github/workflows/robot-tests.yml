@@ -56,7 +56,7 @@ jobs:
             TRIGGER="Push"
           fi
 
-          EXEC_NAME="${{ env.ROBOT_PROJECT_NAME }} | ${BRANCH} | ${EXEC_DATE}"
+          EXEC_NAME="[Auto][${{ env.ROBOT_PROJECT_NAME }}] ${BRANCH} | ${EXEC_DATE}"
           EXEC_SUMMARY="${TRIGGER} - ${BRANCH} - ${EXEC_DATE}"
 
           echo "exec_name=${EXEC_NAME}"       >> $GITHUB_OUTPUT
@@ -426,46 +426,74 @@ jobs:
 
           # ── Genere les etapes de reproduction ─────────────────────────
           def build_steps(test_name, suite_name, error):
+              """
+              Genere des etapes de reproduction MANUELLES, telles qu'un testeur
+              humain les executerait dans le navigateur. Pas de commandes robot.
+              """
               msg  = error["main"]
               kw   = error.get("keyword") or ""
               args = error.get("args", [])
 
-              steps = [
-                  f"Ouvrir le projet '{ROBOT_PROJECT}' et acceder a la suite de tests '{suite_name}'.",
-                  f"Lancer uniquement le test concerne : robot --test \"{test_name}\" Tests/"
-              ]
+              m_title = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
+              m_assert = re.search(
+                  r"'(.+?)' should (contain|be equal to|not contain|start with|end with) '(.+?)'",
+                  msg, re.IGNORECASE)
 
-              m = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
-              if m:
-                  actual, expected = m.group(1), m.group(2)
-                  steps.append(
-                      f"Observer le texte affiche sur la page : la valeur '{actual}' est presente.")
-                  steps.append(
-                      f"Verifier que la valeur attendue est '{expected}' : l'assertion echoue car les deux valeurs different.")
-                  steps.append(
-                      "Corriger la valeur attendue dans le test ou le contenu affiche par l'application selon l'origine du probleme.")
+              if m_title:
+                  actual, expected = m_title.group(1), m_title.group(2)
+                  steps = [
+                      f"Ouvrir un navigateur et acceder a l'application testee.",
+                      f"Naviguer vers la page correspondant a la suite '{suite_name}'.",
+                      f"Verifier le titre ou le texte affiche sur la page : la valeur presente est '{actual}'.",
+                      f"Comparer avec la valeur attendue : '{expected}'.",
+                      f"Constater que les deux valeurs ne correspondent pas : bug confirme.",
+                      f"Identifier si le probleme vient de l'application (contenu incorrect) ou du test (valeur attendue a corriger).",
+                      f"Consulter le screenshot joint pour voir l'etat exact de la page au moment de l'echec."
+                  ]
+              elif m_assert:
+                  actual, cond, expected = m_assert.group(1), m_assert.group(2), m_assert.group(3)
+                  steps = [
+                      f"Ouvrir un navigateur et acceder a l'application testee.",
+                      f"Naviguer vers la page concernee par le test '{test_name}'.",
+                      f"Localiser l'element ou la zone de contenu impliquee.",
+                      f"Verifier que la valeur affichee est '{actual}'.",
+                      f"Comparer avec la valeur attendue : le contenu devrait {cond} '{expected}'.",
+                      f"Constater la difference et determiner l'origine du probleme.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
+                  ]
               elif "timeout" in msg.lower():
-                  steps.append(
-                      f"Executer le keyword '{kw}' et observer que la page ou l'element ne repond pas dans le delai imparti.")
-                  steps.append(
-                      "Verifier la disponibilite de l'application et la stabilite du reseau.")
-                  steps.append(
-                      "Augmenter le delai d'attente dans le test si necessaire, ou investiguer la lenteur cote serveur.")
-              elif "element" in msg.lower():
-                  selector = args[0] if args else "selecteur non disponible"
-                  steps.append(
-                      f"Inspecter la page dans le navigateur et verifier la presence de l'element : {selector}")
-                  steps.append(
-                      "Verifier si le selecteur a change suite a une modification de l'interface ou du DOM.")
+                  steps = [
+                      f"Ouvrir un navigateur et acceder a l'application testee.",
+                      f"Naviguer vers la page concernee par le test '{test_name}'.",
+                      f"Effectuer l'action correspondant a l'etape '{kw}' et observer la reponse de la page.",
+                      f"Constater que la page ou l'element attendu ne s'affiche pas dans un delai raisonnable.",
+                      f"Verifier que l'application est accessible et que le reseau est stable.",
+                      f"Tester sur un autre poste ou environnement pour confirmer si le probleme est reproductible.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment du timeout."
+                  ]
+              elif "element" in msg.lower() and any(
+                      k in msg.lower() for k in ["not found", "not visible", "not attached"]):
+                  selector = args[0] if args else "element inconnu"
+                  steps = [
+                      f"Ouvrir un navigateur et acceder a l'application testee.",
+                      f"Naviguer vers la page concernee par le test '{test_name}'.",
+                      f"Rechercher visuellement l'element suivant sur la page : {selector}.",
+                      f"Constater que l'element est absent, masque ou non charge.",
+                      f"Inspecter le code source de la page (F12) pour verifier la presence de l'element dans le DOM.",
+                      f"Verifier si une modification recente de l'interface a change ou supprime cet element.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
+                  ]
               else:
-                  if kw:
-                      steps.append(
-                          f"Reproduire l'etape correspondant au keyword '{kw}' et observer le comportement.")
-                  steps.append(
-                      "Consulter le log Robot Framework complet dans les artefacts du run CI/CD pour le detail complet de l'execution.")
+                  steps = [
+                      f"Ouvrir un navigateur et acceder a l'application testee.",
+                      f"Naviguer vers la page correspondant a la suite '{suite_name}'.",
+                      f"Reproduire manuellement les actions du test '{test_name}'.",
+                      f"Observer le comportement de l'application a l'etape '{kw}' si applicable.",
+                      f"Comparer le comportement obtenu avec le comportement attendu.",
+                      f"Consulter le log complet dans les artefacts du run CI/CD pour le detail de l'execution.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
+                  ]
 
-              steps.append(
-                  "Consulter le screenshot joint au ticket pour visualiser l'etat exact de la page au moment de l'echec.")
               return steps
 
           # ── Construction de la description Jira (format ADF) ───────────
