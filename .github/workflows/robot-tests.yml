@@ -6,7 +6,7 @@ on:
       - main
   pull_request:
   schedule:
-      - cron: '30 0 * * *'
+    - cron: '0 8 * * 5'   # Declenchement automatique chaque vendredi a 9h (Maroc, UTC+1)
 
 jobs:
   robot-tests:
@@ -35,8 +35,8 @@ jobs:
       # ------------------------------------------------------------------
       - name: Install dependencies
         run: |
-          pip install robotframework robotframework-browser -q > /dev/null 2>&1
-          python -m Browser.entry init > /dev/null 2>&1
+          pip install robotframework robotframework-browser
+          python -m Browser.entry init
 
       # ------------------------------------------------------------------
       # 4. CALCUL DU NOM DE L'EXECUTION
@@ -70,16 +70,21 @@ jobs:
       # ------------------------------------------------------------------
       - name: Run Robot Framework Tests
         run: |
+          # Exit codes Robot Framework :
+          #   0 = tous passes, 1-4 = erreurs graves, 5 = certains tests echoues (normal)
+          # On capture le code retour pour ne pas faire echouer le step sur un exit 5.
           robot \
             --outputdir Result \
             --output output.xml \
             --log log.html \
             --report report.html \
             --variable BROWSER:chromium \
-            Tests/ > /dev/null 2>&1 || EXIT_CODE=$?
+            Tests/ || EXIT_CODE=$?
           if [ "${EXIT_CODE:-0}" -le 5 ]; then
+            echo "Robot termine avec exit code ${EXIT_CODE:-0} (normal)"
             exit 0
           else
+            echo "Erreur critique Robot Framework (exit code ${EXIT_CODE})"
             exit ${EXIT_CODE}
           fi
 
@@ -88,7 +93,9 @@ jobs:
       # ------------------------------------------------------------------
       - name: List captured screenshots
         if: always()
-        run: find Result/ -name "*.png" -o -name "*.jpg" 2>/dev/null > /dev/null
+        run: |
+          echo "Screenshots disponibles :"
+          find Result/ -name "*.png" -o -name "*.jpg" 2>/dev/null | sort || echo "Aucun screenshot trouve"
 
       # ------------------------------------------------------------------
       # 7. AUTHENTIFICATION XRAY
@@ -107,10 +114,13 @@ jobs:
       # 8. INSTALLATION DE JQ
       # ------------------------------------------------------------------
       - name: Install jq
-        run: sudo apt-get install -y jq > /dev/null 2>&1
+        run: sudo apt-get install -y jq
 
       # ------------------------------------------------------------------
       # 9. ENVOI DES RESULTATS VERS XRAY
+      #    Le champ info est ecrit dans un fichier JSON temporaire
+      #    pour que curl envoie correctement le Content-Type multipart
+      #    Format du nom : Project1 | main | 2025-06-13 14:30
       # ------------------------------------------------------------------
       - name: Upload results to Xray
         shell: bash
@@ -122,6 +132,7 @@ jobs:
           TRIGGER:      ${{ steps.exec_meta.outputs.trigger }}
         run: |
           if [ ! -f Result/output.xml ]; then
+            echo "output.xml not found"
             exit 1
           fi
 
@@ -129,6 +140,7 @@ jobs:
           PASSED=$(grep -o 'status="PASS"' Result/output.xml | wc -l)
           FAILED=$(grep -o 'status="FAIL"' Result/output.xml | wc -l)
 
+          # Description lisible de la Test Execution (visible dans Jira)
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
             TRIGGER_DESC="planifiee automatiquement"
           elif [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
@@ -138,6 +150,8 @@ jobs:
           fi
           DESC="Cette execution de tests a ete ${TRIGGER_DESC} le ${EXEC_DATE} sur la branche ${BRANCH}. Projet : ${{ env.ROBOT_PROJECT_NAME }}. Resultats : ${PASSED} tests passes, ${FAILED} tests echoues sur ${TOTAL} au total."
 
+          # Le champ info doit etre envoye comme fichier (@) pour que
+          # curl definisse le bon Content-Type de la partie multipart
           jq -n \
             --arg summary "${EXEC_NAME}" \
             --arg desc    "${DESC}"      \
@@ -151,6 +165,9 @@ jobs:
               }
             }' > /tmp/xray_info.json
 
+          echo "--- testExecInfo envoye ---"
+          cat /tmp/xray_info.json
+
           RESPONSE=$(curl -s \
             -X POST \
             -H "Authorization: Bearer $XRAY_TOKEN" \
@@ -158,9 +175,15 @@ jobs:
             -F "results=@Result/output.xml;type=text/xml" \
             "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot/multipart")
 
+          echo "===== XRAY RESPONSE ====="
+          echo "$RESPONSE"
+          echo "========================="
+
           EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key // empty')
 
           if [ -z "$EXEC_KEY" ] || [ "$EXEC_KEY" = "null" ]; then
+            echo "Multipart echoue - fallback envoi simple (sans nom personnalise)"
+
             RESPONSE=$(curl -s \
               -X POST \
               -H "Authorization: Bearer $XRAY_TOKEN" \
@@ -168,25 +191,46 @@ jobs:
               --data @"Result/output.xml" \
               "https://eu.xray.cloud.getxray.app/api/v2/import/execution/robot?projectKey=QATEAM")
 
+            echo "===== XRAY FALLBACK RESPONSE ====="
+            echo "$RESPONSE"
+            echo "=================================="
+
             EXEC_KEY=$(echo "$RESPONSE" | jq -r '.testExecIssue.key // .key // empty')
           fi
 
           if [ -z "$EXEC_KEY" ] || [ "$EXEC_KEY" = "null" ]; then
+            echo "Impossible de creer la Test Execution"
             exit 1
           fi
 
+          echo "Test Execution creee : $EXEC_KEY"
+          echo "https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
+
+          # Garantit le bon titre meme si Xray l'a ecrase lors du fallback
           curl -s -X PUT \
             -H "Authorization: Basic $(echo -n '${{ secrets.JIRA_USER }}:${{ secrets.JIRA_API_TOKEN }}' | base64)" \
             -H "Content-Type: application/json" \
             --data "{\"fields\":{\"summary\":\"${EXEC_NAME}\"}}" \
             "https://hindmoustainbillah29.atlassian.net/rest/api/3/issue/${EXEC_KEY}" \
-            > /dev/null
+            > /dev/null && echo "Summary mis a jour : ${EXEC_NAME}"
 
-          echo "EXEC_KEY=$EXEC_KEY"                         >> $GITHUB_ENV
+          echo "EXEC_KEY=$EXEC_KEY"                        >> $GITHUB_ENV
           echo "EXEC_STATS=${PASSED}P/${FAILED}F/${TOTAL}T" >> $GITHUB_ENV
 
       # ------------------------------------------------------------------
       # 10. CREATION AUTOMATIQUE DE BUGS JIRA
+      #
+      #     Description structuree en 4 sections ordonnees :
+      #       1. Identification du test  (projet, suite, test, date, declenchement)
+      #       2. Erreur detectee         (message reformule clairement + detail technique)
+      #       3. Etapes de reproduction  (generees selon le keyword et le type d'erreur)
+      #       4. Liens utiles            (run CI/CD + Test Execution Xray)
+      #
+      #     Autres fonctionnalites :
+      #       - Screenshot attache en piece jointe si disponible
+      #       - Priorite automatique selon le type d'erreur
+      #       - Anti-doublon par titre exact
+      #       - Liaison du bug a la Test Execution Xray
       # ------------------------------------------------------------------
       - name: Creer bugs Jira pour tests echoues
         if: always()
@@ -205,8 +249,9 @@ jobs:
         run: |
           python3 - <<'PYEOF'
           import xml.etree.ElementTree as ET
-          import json, os, re, urllib.request, urllib.error, base64, glob, mimetypes, sys
+          import json, os, re, urllib.request, urllib.error, base64, glob, mimetypes
 
+          # ── Variables d'environnement ──────────────────────────────────
           USER          = os.environ["JIRA_USER"]
           TOKEN         = os.environ["JIRA_API_TOKEN"]
           BASE          = os.environ["JIRA_BASE_URL"]
@@ -228,6 +273,7 @@ jobs:
               "Accept":        "application/json"
           }
 
+          # ── Appel API Jira ─────────────────────────────────────────────
           def jira(method, path, data=None):
               req = urllib.request.Request(
                   f"{BASE}/rest/api/3/{path}",
@@ -240,6 +286,7 @@ jobs:
               except urllib.error.HTTPError as e:
                   return {"error": e.read().decode()[:200]}
 
+          # ── Attacher un screenshot en piece jointe ─────────────────────
           def attach_file(issue_key, filepath):
               filename = os.path.basename(filepath)
               mime     = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
@@ -264,10 +311,11 @@ jobs:
                       resp = json.loads(r.read().decode())
                       if isinstance(resp, list) and resp:
                           return resp[0].get("id"), resp[0].get("content")
-              except urllib.error.HTTPError:
-                  pass
+              except urllib.error.HTTPError as e:
+                  print(f"    Erreur upload screenshot : {e.read().decode()[:100]}")
               return None, None
 
+          # ── Priorite selon le message d'erreur ─────────────────────────
           def priority(msg):
               m = msg.lower()
               if any(k in m for k in ["critical", "crash", "timeout", "connection", "refused"]):
@@ -276,24 +324,34 @@ jobs:
                   return "Medium"
               return "Low"
 
+          # ── Anti-doublon ───────────────────────────────────────────────
+          # Retourne la cle du bug si un bug OUVERT (non ferme) existe deja.
+          # Si le bug existe mais est ferme (Done), retourne None => recreation.
           def bug_exists(summary):
               safe = summary.replace("\\", "\\\\").replace('"', '\\"')
+              # Cherche uniquement parmi les bugs NON fermes
               jql_open = urllib.request.quote(
                   f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
               r = jira("GET", f"search?jql={jql_open}&maxResults=1&fields=summary,status")
               if r.get("total", 0) > 0:
-                  return r["issues"][0]["key"]
-              return None
+                  return r["issues"][0]["key"]   # Bug ouvert => ne pas recreer
+              return None                         # Absent ou ferme => creer
 
+          # ── Lien bug <-> Test Execution ────────────────────────────────
           def link_to_execution(bug_key):
               if not EXEC_KEY:
                   return
-              jira("POST", "issueLink", {
+              r = jira("POST", "issueLink", {
                   "type":         {"name": "Blocks"},
                   "inwardIssue":  {"key": bug_key},
                   "outwardIssue": {"key": EXEC_KEY}
               })
+              if r.get("error"):
+                  print(f"    Lien {bug_key} -> {EXEC_KEY} echoue : {str(r['error'])[:80]}")
+              else:
+                  print(f"    Lie a {EXEC_KEY}")
 
+          # ── Extraction des details d'erreur depuis le XML ──────────────
           def get_error_details(test, st):
               main_msg = st.get("message", "").strip()
               error_lines = []
@@ -322,6 +380,7 @@ jobs:
                   "library": keyword_library
               }
 
+          # ── Recherche du screenshot associe au test ────────────────────
           def find_screenshot(test_name):
               clean = test_name.replace(" ", "*").replace("/", "*")
               for pattern in [
@@ -337,10 +396,12 @@ jobs:
                       return files[-1]
               return None
 
+          # ── Reformule le message brut Robot en langage clair ──────────
           def human_error(error, test_name):
               msg = error["main"]
               kw  = error.get("keyword") or "inconnu"
 
+              # Comparaison de texte (titre de page, Should Be Equal As Strings...)
               m = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
               if m:
                   actual, expected = m.group(1), m.group(2)
@@ -351,6 +412,7 @@ jobs:
                       f"Le contenu de la page ne correspond pas au resultat attendu."
                   )
 
+              # Assertion generique Should Contain / Should Be Equal
               m = re.search(
                   r"'(.+?)' should (contain|be equal to|not contain|start with|end with) '(.+?)'",
                   msg, re.IGNORECASE)
@@ -361,6 +423,7 @@ jobs:
                       f"Condition attendue : {m.group(2)} '{m.group(3)}'"
                   )
 
+              # Timeout
               if "timeout" in msg.lower():
                   return (
                       f"Le test a expire (timeout) lors de l'execution du keyword '{kw}'.\n"
@@ -368,6 +431,7 @@ jobs:
                       f"Detail technique : {msg}"
                   )
 
+              # Element introuvable ou non visible
               if "element" in msg.lower() and any(
                       k in msg.lower() for k in ["not found", "not visible", "not attached"]):
                   return (
@@ -376,12 +440,18 @@ jobs:
                       f"Detail technique : {msg}"
                   )
 
+              # Cas generique
               return (
                   f"Le test '{test_name}' a echoue lors de l'execution du keyword '{kw}'.\n"
                   f"Detail technique : {msg}"
               )
 
+          # ── Genere les etapes de reproduction ─────────────────────────
           def build_steps(test_name, suite_name, error):
+              """
+              Genere des etapes de reproduction MANUELLES, telles qu'un testeur
+              humain les executerait dans le navigateur. Pas de commandes robot.
+              """
               msg  = error["main"]
               kw   = error.get("keyword") or ""
               args = error.get("args", [])
@@ -448,6 +518,10 @@ jobs:
 
               return steps
 
+          # ── Construction de la description Jira (format ADF) ───────────
+          #
+          # Ordre : 1. Identification  2. Erreur  3. Etapes  4. Liens
+          # ──────────────────────────────────────────────────────────────
           def build_description(test_name, suite_name, error, has_screenshot=False):
 
               def para(text):
@@ -485,6 +559,7 @@ jobs:
 
               content = []
 
+              # 1. Identification du test
               content.append(heading("Identification du test", 3))
               content.append(bullet_list([
                   f"Projet Robot Framework : {ROBOT_PROJECT}",
@@ -495,6 +570,7 @@ jobs:
               ]))
               content.append(rule())
 
+              # 2. Erreur detectee (message reformule + detail technique si plusieurs lignes)
               content.append(heading("Bug detecte", 3))
               for line in human_error(error, test_name).split("\n"):
                   if line.strip():
@@ -504,10 +580,12 @@ jobs:
                   content.append(code_block("\n".join(error["lines"])))
               content.append(rule())
 
+              # 3. Etapes de reproduction (liste numerotee)
               content.append(heading("Etapes de reproduction", 3))
               content.append(ordered_list(build_steps(test_name, suite_name, error)))
               content.append(rule())
 
+              # 4. Liens utiles
               content.append(heading("Liens utiles", 3))
               link_items = [f"Run CI/CD : {RUN_URL}"]
               if EXEC_KEY:
@@ -518,11 +596,14 @@ jobs:
 
               return {"version": 1, "type": "doc", "content": content}
 
+          # ── Lecture du fichier de resultats Robot Framework ────────────
           try:
               root = ET.parse("Result/output.xml").getroot()
-          except Exception:
-              sys.exit(0)
+          except Exception as e:
+              print(f"Erreur de lecture output.xml : {e}")
+              exit(0)
 
+          # ── Collecte des tests en echec ────────────────────────────────
           fails = []
           for suite in root.iter("suite"):
               suite_name = suite.get("name", "Suite inconnue")
@@ -536,14 +617,23 @@ jobs:
                       })
 
           if not fails:
-              sys.exit(0)
+              print("Aucun test echoue - pas de bug a creer.")
+              exit(0)
+
+          print(f"\n{'='*65}")
+          print(f"  CREATION DES BUGS JIRA - {ROBOT_PROJECT} - {EXEC_DATE}")
+          print(f"{'='*65}\n")
+
+          created = skipped = errors = 0
 
           for t in fails:
               summary = f"[{ROBOT_PROJECT}] {t['name']}"
               key     = bug_exists(summary)
 
               if key:
+                  print(f"  IGNORE (deja ouvert -> {key}) : {t['name']}")
                   link_to_execution(key)
+                  skipped += 1
                   continue
 
               screenshot_path = find_screenshot(t["name"])
@@ -564,9 +654,25 @@ jobs:
 
               if r.get("key"):
                   new_key = r["key"]
+                  print(f"  CREE [{prio:<6}] -> {new_key} : {t['name']}")
                   if screenshot_path:
-                      attach_file(new_key, screenshot_path)
+                      att_id, _ = attach_file(new_key, screenshot_path)
+                      if att_id:
+                          print(f"    Screenshot attache : {os.path.basename(screenshot_path)}")
+                      else:
+                          print(f"    Echec de l'upload du screenshot")
+                  else:
+                      print(f"    Aucun screenshot disponible pour ce test")
                   link_to_execution(new_key)
+                  created += 1
+              else:
+                  print(f"  ERREUR : {t['name']} -- {str(r.get('error','?'))[:80]}")
+                  errors += 1
+
+          print(f"\n{'='*65}")
+          print(f"  Crees : {created}   Ignores : {skipped}" +
+                (f"   Erreurs : {errors}" if errors else ""))
+          print(f"{'='*65}")
           PYEOF
 
       # ------------------------------------------------------------------
