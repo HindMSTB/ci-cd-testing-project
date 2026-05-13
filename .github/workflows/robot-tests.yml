@@ -70,9 +70,6 @@ jobs:
       # ------------------------------------------------------------------
       - name: Run Robot Framework Tests
         run: |
-          # Exit codes Robot Framework :
-          #   0 = tous passes, 1-4 = erreurs graves, 5 = certains tests echoues (normal)
-          # On capture le code retour pour ne pas faire echouer le step sur un exit 5.
           robot \
             --outputdir Result \
             --output output.xml \
@@ -118,9 +115,6 @@ jobs:
 
       # ------------------------------------------------------------------
       # 9. ENVOI DES RESULTATS VERS XRAY
-      #    Le champ info est ecrit dans un fichier JSON temporaire
-      #    pour que curl envoie correctement le Content-Type multipart
-      #    Format du nom : Project1 | main | 2025-06-13 14:30
       # ------------------------------------------------------------------
       - name: Upload results to Xray
         shell: bash
@@ -140,7 +134,6 @@ jobs:
           PASSED=$(grep -o 'status="PASS"' Result/output.xml | wc -l)
           FAILED=$(grep -o 'status="FAIL"' Result/output.xml | wc -l)
 
-          # Description lisible de la Test Execution (visible dans Jira)
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
             TRIGGER_DESC="planifiee automatiquement"
           elif [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
@@ -148,10 +141,8 @@ jobs:
           else
             TRIGGER_DESC="declenchee manuellement (Push)"
           fi
-          DESC="Cette execution de tests a ete ${TRIGGER_DESC} le ${EXEC_DATE} sur la branche ${BRANCH}. Projet : ${{ env.ROBOT_PROJECT_NAME }}. Resultats : ${PASSED} tests passes, ${FAILED} tests echoues sur ${TOTAL} au total."
+          DESC="Cette exécution de tests a été déclenchée automatiquement le ${EXEC_DATE}"
 
-          # Le champ info doit etre envoye comme fichier (@) pour que
-          # curl definisse le bon Content-Type de la partie multipart
           jq -n \
             --arg summary "${EXEC_NAME}" \
             --arg desc    "${DESC}"      \
@@ -206,7 +197,6 @@ jobs:
           echo "Test Execution creee : $EXEC_KEY"
           echo "https://hindmoustainbillah29.atlassian.net/browse/$EXEC_KEY"
 
-          # Garantit le bon titre meme si Xray l'a ecrase lors du fallback
           curl -s -X PUT \
             -H "Authorization: Basic $(echo -n '${{ secrets.JIRA_USER }}:${{ secrets.JIRA_API_TOKEN }}' | base64)" \
             -H "Content-Type: application/json" \
@@ -219,18 +209,6 @@ jobs:
 
       # ------------------------------------------------------------------
       # 10. CREATION AUTOMATIQUE DE BUGS JIRA
-      #
-      #     Description structuree en 4 sections ordonnees :
-      #       1. Identification du test  (projet, suite, test, date, declenchement)
-      #       2. Erreur detectee         (message reformule clairement + detail technique)
-      #       3. Etapes de reproduction  (generees selon le keyword et le type d'erreur)
-      #       4. Liens utiles            (run CI/CD + Test Execution Xray)
-      #
-      #     Autres fonctionnalites :
-      #       - Screenshot attache en piece jointe si disponible
-      #       - Priorite automatique selon le type d'erreur
-      #       - Anti-doublon par titre exact
-      #       - Liaison du bug a la Test Execution Xray
       # ------------------------------------------------------------------
       - name: Creer bugs Jira pour tests echoues
         if: always()
@@ -251,7 +229,6 @@ jobs:
           import xml.etree.ElementTree as ET
           import json, os, re, urllib.request, urllib.error, base64, glob, mimetypes
 
-          # ── Variables d'environnement ──────────────────────────────────
           USER          = os.environ["JIRA_USER"]
           TOKEN         = os.environ["JIRA_API_TOKEN"]
           BASE          = os.environ["JIRA_BASE_URL"]
@@ -273,7 +250,6 @@ jobs:
               "Accept":        "application/json"
           }
 
-          # ── Appel API Jira ─────────────────────────────────────────────
           def jira(method, path, data=None):
               req = urllib.request.Request(
                   f"{BASE}/rest/api/3/{path}",
@@ -286,7 +262,6 @@ jobs:
               except urllib.error.HTTPError as e:
                   return {"error": e.read().decode()[:200]}
 
-          # ── Attacher un screenshot en piece jointe ─────────────────────
           def attach_file(issue_key, filepath):
               filename = os.path.basename(filepath)
               mime     = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
@@ -315,7 +290,6 @@ jobs:
                   print(f"    Erreur upload screenshot : {e.read().decode()[:100]}")
               return None, None
 
-          # ── Priorite selon le message d'erreur ─────────────────────────
           def priority(msg):
               m = msg.lower()
               if any(k in m for k in ["critical", "crash", "timeout", "connection", "refused"]):
@@ -324,20 +298,15 @@ jobs:
                   return "Medium"
               return "Low"
 
-          # ── Anti-doublon ───────────────────────────────────────────────
-          # Retourne la cle du bug si un bug OUVERT (non ferme) existe deja.
-          # Si le bug existe mais est ferme (Done), retourne None => recreation.
           def bug_exists(summary):
               safe = summary.replace("\\", "\\\\").replace('"', '\\"')
-              # Cherche uniquement parmi les bugs NON fermes
               jql_open = urllib.request.quote(
                   f'project={PROJ} AND issuetype=Bug AND summary="{safe}" AND statusCategory != Done')
               r = jira("GET", f"search?jql={jql_open}&maxResults=1&fields=summary,status")
               if r.get("total", 0) > 0:
-                  return r["issues"][0]["key"]   # Bug ouvert => ne pas recreer
-              return None                         # Absent ou ferme => creer
+                  return r["issues"][0]["key"]
+              return None
 
-          # ── Lien bug <-> Test Execution ────────────────────────────────
           def link_to_execution(bug_key):
               if not EXEC_KEY:
                   return
@@ -351,7 +320,6 @@ jobs:
               else:
                   print(f"    Lie a {EXEC_KEY}")
 
-          # ── Extraction des details d'erreur depuis le XML ──────────────
           def get_error_details(test, st):
               main_msg = st.get("message", "").strip()
               error_lines = []
@@ -380,7 +348,6 @@ jobs:
                   "library": keyword_library
               }
 
-          # ── Recherche du screenshot associe au test ────────────────────
           def find_screenshot(test_name):
               clean = test_name.replace(" ", "*").replace("/", "*")
               for pattern in [
@@ -396,39 +363,40 @@ jobs:
                       return files[-1]
               return None
 
-          # ── Reformule le message brut Robot en langage clair ──────────
           def human_error(error, test_name):
               msg = error["main"]
               kw  = error.get("keyword") or "inconnu"
 
-              # Comparaison de texte (titre de page, Should Be Equal As Strings...)
+              # ── Titre de page incorrect ────────────────────────────────
               m = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
               if m:
                   actual, expected = m.group(1), m.group(2)
                   return (
-                      f"Le test a detecte un titre ou un texte incorrect sur la page.\n"
-                      f"Valeur affichee sur la page : '{actual}'\n"
-                      f"Valeur attendue par le test : '{expected}'\n\n"
-                      f"Le contenu de la page ne correspond pas au resultat attendu."
+                      f"Le titre affiche sur la page est incorrect.\n"
+                      f"Titre affiche : '{actual}'\n"
+                      f"Titre attendu : '{expected}'\n\n"
+                      f"Le titre de la page ne correspond pas au resultat attendu apres l'action effectuee."
                   )
 
-              # Assertion generique Should Contain / Should Be Equal
+              # Assertion generique
               m = re.search(
                   r"'(.+?)' should (contain|be equal to|not contain|start with|end with) '(.+?)'",
                   msg, re.IGNORECASE)
               if m:
                   return (
-                      f"Une assertion a echoue dans le test '{test_name}'.\n"
+                      f"Une verification a echoue dans le test '{test_name}'.\n"
                       f"Valeur obtenue : '{m.group(1)}'\n"
                       f"Condition attendue : {m.group(2)} '{m.group(3)}'"
                   )
 
-              # Timeout
+              # ── Timeout = element introuvable ──────────────────────────
               if "timeout" in msg.lower():
+                  locator_match = re.search(r"waiting for locator\('(.+?)'\)", msg)
+                  locator_info  = f" '{locator_match.group(1)}'" if locator_match else ""
                   return (
-                      f"Le test a expire (timeout) lors de l'execution du keyword '{kw}'.\n"
-                      f"L'element ou la page attendue n'a pas repondu dans le delai imparti.\n"
-                      f"Detail technique : {msg}"
+                      f"L'element{locator_info} est introuvable sur la page lors de l'execution du keyword '{kw}'.\n"
+                      f"Cet element n'existe pas ou n'est pas present dans le DOM au moment du test.\n"
+                      f"Verifier si l'element a ete supprime, renomme ou si la page ne se charge pas correctement."
                   )
 
               # Element introuvable ou non visible
@@ -446,12 +414,7 @@ jobs:
                   f"Detail technique : {msg}"
               )
 
-          # ── Genere les etapes de reproduction ─────────────────────────
           def build_steps(test_name, suite_name, error):
-              """
-              Genere des etapes de reproduction MANUELLES, telles qu'un testeur
-              humain les executerait dans le navigateur. Pas de commandes robot.
-              """
               msg  = error["main"]
               kw   = error.get("keyword") or ""
               args = error.get("args", [])
@@ -466,11 +429,11 @@ jobs:
                   steps = [
                       f"Ouvrir un navigateur et acceder a l'application testee.",
                       f"Naviguer vers la page correspondant a la suite '{suite_name}'.",
-                      f"Verifier le titre ou le texte affiche sur la page : la valeur presente est '{actual}'.",
-                      f"Comparer avec la valeur attendue : '{expected}'.",
-                      f"Constater que les deux valeurs ne correspondent pas : bug confirme.",
-                      f"Identifier si le probleme vient de l'application (contenu incorrect) ou du test (valeur attendue a corriger).",
-                      f"Consulter le screenshot joint pour voir l'etat exact de la page au moment de l'echec."
+                      f"Effectuer l'action du test '{test_name}' (ex : soumettre le formulaire de connexion).",
+                      f"Observer le titre affiche sur la page apres l'action : '{actual}'.",
+                      f"Comparer avec le titre attendu : '{expected}'.",
+                      f"Constater que le titre ne correspond pas : le comportement de l'application est incorrect.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
                   ]
               elif m_assert:
                   actual, cond, expected = m_assert.group(1), m_assert.group(2), m_assert.group(3)
@@ -484,14 +447,16 @@ jobs:
                       f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
                   ]
               elif "timeout" in msg.lower():
+                  locator_match = re.search(r"waiting for locator\('(.+?)'\)", msg)
+                  locator_info  = f"'{locator_match.group(1)}'" if locator_match else "l'element attendu"
                   steps = [
                       f"Ouvrir un navigateur et acceder a l'application testee.",
                       f"Naviguer vers la page concernee par le test '{test_name}'.",
-                      f"Effectuer l'action correspondant a l'etape '{kw}' et observer la reponse de la page.",
-                      f"Constater que la page ou l'element attendu ne s'affiche pas dans un delai raisonnable.",
-                      f"Verifier que l'application est accessible et que le reseau est stable.",
-                      f"Tester sur un autre poste ou environnement pour confirmer si le probleme est reproductible.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment du timeout."
+                      f"Effectuer l'action correspondant a l'etape '{kw}'.",
+                      f"Observer la page : l'element {locator_info} n'apparait pas.",
+                      f"Inspecter le code source (F12) pour verifier si {locator_info} existe dans le DOM.",
+                      f"Verifier si une modification recente a supprime ou renomme cet element.",
+                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
                   ]
               elif "element" in msg.lower() and any(
                       k in msg.lower() for k in ["not found", "not visible", "not attached"]):
@@ -518,10 +483,6 @@ jobs:
 
               return steps
 
-          # ── Construction de la description Jira (format ADF) ───────────
-          #
-          # Ordre : 1. Identification  2. Erreur  3. Etapes  4. Liens
-          # ──────────────────────────────────────────────────────────────
           def build_description(test_name, suite_name, error, has_screenshot=False):
 
               def para(text):
@@ -559,18 +520,17 @@ jobs:
 
               content = []
 
-              # 1. Identification du test
+              # 1. Identification du test  (sans "Declenchement")
               content.append(heading("Identification du test", 3))
               content.append(bullet_list([
                   f"Projet Robot Framework : {ROBOT_PROJECT}",
                   f"Suite : {suite_name}",
                   f"Test : {test_name}",
                   f"Date d'execution : {EXEC_DATE}",
-                  f"Declenchement : {TRIGGER}"
               ]))
               content.append(rule())
 
-              # 2. Erreur detectee (message reformule + detail technique si plusieurs lignes)
+              # 2. Erreur detectee
               content.append(heading("Bug detecte", 3))
               for line in human_error(error, test_name).split("\n"):
                   if line.strip():
@@ -580,7 +540,7 @@ jobs:
                   content.append(code_block("\n".join(error["lines"])))
               content.append(rule())
 
-              # 3. Etapes de reproduction (liste numerotee)
+              # 3. Etapes de reproduction
               content.append(heading("Etapes de reproduction", 3))
               content.append(ordered_list(build_steps(test_name, suite_name, error)))
               content.append(rule())
@@ -596,14 +556,12 @@ jobs:
 
               return {"version": 1, "type": "doc", "content": content}
 
-          # ── Lecture du fichier de resultats Robot Framework ────────────
           try:
               root = ET.parse("Result/output.xml").getroot()
           except Exception as e:
               print(f"Erreur de lecture output.xml : {e}")
               exit(0)
 
-          # ── Collecte des tests en echec ────────────────────────────────
           fails = []
           for suite in root.iter("suite"):
               suite_name = suite.get("name", "Suite inconnue")
