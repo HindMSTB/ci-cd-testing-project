@@ -2,14 +2,10 @@
 Library     Browser
 Resource    ../Keywords/login.resource
 
-*** Keywords ***
-Verify Wrong Title
-    Wait For Elements State    css=.title    visible    10s
-    Get Text    css=.title    ==    TITRE_QUI_NEXISTE_PAS
-
 *** Test Cases ***
 
 Vérification titre page accueil après connexion
+    [Documentation]    Vérifie que l’utilisateur standard accède correctement à la page Products après connexion.
     [Tags]    QATEAM-9
     Open Login Page
     Login    standard_user    secret_sauce
@@ -17,6 +13,7 @@ Vérification titre page accueil après connexion
     Close Browser
 
 Vérification page accueil utilisateur performance
+    [Documentation]    Vérifie que l’utilisateur performance_glitch_user accède correctement à la page Products après connexion.
     [Tags]    QATEAM-10
     Open Login Page
     Login    performance_glitch_user    secret_sauce
@@ -24,6 +21,7 @@ Vérification page accueil utilisateur performance
     Close Browser
 
 Vérification page accueil titre incorrect
+    [Documentation]    Vérifie le comportement du système lorsque le titre attendu de la page d’accueil est incorrect.
     [Tags]    QATEAM-15
     Open Login Page
     Login    standard_user    secret_sauce
