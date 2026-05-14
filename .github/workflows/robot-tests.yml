@@ -363,127 +363,168 @@ jobs:
                       return files[-1]
               return None
 
-          def human_error(error, test_name):
+          # ----------------------------------------------------------------
+          # NOUVELLES FONCTIONS : lecture doc + keywords depuis output.xml
+          # ----------------------------------------------------------------
+
+          # Keywords à ignorer dans les étapes de reproduction
+          _IGNORE_KW = {
+              "close browser", "close page", "close context",
+              "log", "comment", "set variable", "set suite variable",
+              "set test variable", "run keyword if", "run keywords"
+          }
+
+          def get_test_documentation(test):
+              """
+              Lit la balise <doc> du test Robot Framework.
+              Correspond à [Documentation] dans le fichier .robot.
+              Retourne None si absente ou vide.
+              """
+              doc_el = test.find("doc")
+              if doc_el is not None and doc_el.text and doc_el.text.strip():
+                  return doc_el.text.strip()
+              return None
+
+          def get_steps_from_keywords(test):
+              """
+              Extrait les étapes de reproduction depuis les keywords de niveau 1
+              du test (test.findall("kw") = direct children uniquement).
+
+              Ces keywords correspondent aux appels customs dans le .robot :
+                  Open Login Page
+                  Login    standard_user    secret_sauce
+                  Verify Login Success
+
+              Pour chaque keyword :
+              - Son nom devient le libellé de l'étape
+              - Ses arguments sont ajoutés entre parenthèses (max 2, filtrés)
+
+              Les keywords utilitaires (Close Browser, Log, etc.) sont ignorés.
+              """
+              IGNORE = _IGNORE_KW
+              steps  = []
+
+              for kw in test.findall("kw"):   # niveau 1 seulement
+                  name = kw.get("name", "").strip()
+                  if not name or name.lower() in IGNORE:
+                      continue
+
+                  # Arguments directs du keyword (pas ceux des sous-keywords)
+                  args = [
+                      a.text.strip()
+                      for a in kw.findall("arg")
+                      if a.text and a.text.strip() and a.text.strip() != "${EMPTY}"
+                  ]
+
+                  if args:
+                      # Tronque les args trop longs pour la lisibilité
+                      readable = [a if len(a) <= 50 else a[:47] + "..." for a in args[:2]]
+                      label = f"{name} ({', '.join(readable)})"
+                  else:
+                      label = name
+
+                  steps.append(label)
+
+              return steps if steps else None
+
+          def human_error(test_el, error, test_name):
+              """
+              Génère le texte du bug détecté.
+
+              Priorité :
+              1. [Documentation] du test → objectif métier clair
+              2. Regex sur le message d'erreur → fallback descriptif
+              """
+              doc = get_test_documentation(test_el)
               msg = error["main"]
               kw  = error.get("keyword") or "inconnu"
 
-              # ── Titre de page incorrect ────────────────────────────────
+              if doc:
+                  # La documentation décrit ce que le test DEVRAIT faire.
+                  # Le bug = cet objectif n'a pas été atteint.
+                  lines = [f"Objectif du test : {doc}", ""]
+                  lines.append(f"Erreur rencontrée lors de l'exécution du keyword '{kw}' :")
+                  lines.append(msg)
+                  return "\n".join(lines)
+
+              # ── Fallback regex (si pas de [Documentation]) ──────────────
               m = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
               if m:
                   actual, expected = m.group(1), m.group(2)
                   return (
-                      f"Le titre affiche sur la page est incorrect.\n"
-                      f"Titre affiche : '{actual}'\n"
+                      f"Le titre affiché sur la page est incorrect.\n"
+                      f"Titre affiché : '{actual}'\n"
                       f"Titre attendu : '{expected}'\n\n"
-                      f"Le titre de la page ne correspond pas au resultat attendu apres l'action effectuee."
+                      f"Le titre de la page ne correspond pas au résultat attendu."
                   )
 
-              # Assertion generique
               m = re.search(
                   r"'(.+?)' should (contain|be equal to|not contain|start with|end with) '(.+?)'",
                   msg, re.IGNORECASE)
               if m:
                   return (
-                      f"Une verification a echoue dans le test '{test_name}'.\n"
+                      f"Une vérification a échoué dans le test '{test_name}'.\n"
                       f"Valeur obtenue : '{m.group(1)}'\n"
                       f"Condition attendue : {m.group(2)} '{m.group(3)}'"
                   )
 
-              # ── Timeout = element introuvable ──────────────────────────
               if "timeout" in msg.lower():
                   locator_match = re.search(r"waiting for locator\('(.+?)'\)", msg)
                   locator_info  = f" '{locator_match.group(1)}'" if locator_match else ""
                   return (
-                      f"L'element{locator_info} est introuvable sur la page lors de l'execution du keyword '{kw}'.\n"
-                      f"Cet element n'existe pas ou n'est pas present dans le DOM au moment du test.\n"
-                      f"Verifier si l'element a ete supprime, renomme ou si la page ne se charge pas correctement."
+                      f"L'élément{locator_info} est introuvable sur la page "
+                      f"lors de l'exécution du keyword '{kw}'.\n"
+                      f"Vérifier si l'élément a été supprimé, renommé ou si la page ne charge pas."
                   )
 
-              # Element introuvable ou non visible
               if "element" in msg.lower() and any(
                       k in msg.lower() for k in ["not found", "not visible", "not attached"]):
                   return (
-                      f"Un element de la page est introuvable ou non visible "
-                      f"lors de l'execution du keyword '{kw}'.\n"
-                      f"Detail technique : {msg}"
+                      f"Un élément de la page est introuvable ou non visible "
+                      f"lors de l'exécution du keyword '{kw}'.\n"
+                      f"Détail technique : {msg}"
                   )
 
-              # Cas generique
               return (
-                  f"Le test '{test_name}' a echoue lors de l'execution du keyword '{kw}'.\n"
-                  f"Detail technique : {msg}"
+                  f"Le test '{test_name}' a échoué lors de l'exécution du keyword '{kw}'.\n"
+                  f"Détail technique : {msg}"
               )
 
-          def build_steps(test_name, suite_name, error):
-              msg  = error["main"]
-              kw   = error.get("keyword") or ""
-              args = error.get("args", [])
+          def build_steps(test_el, test_name, suite_name, error):
+              """
+              Génère les étapes de reproduction.
 
-              m_title = re.search(r"Text '(.+?)' \(str\) should be '(.+?)' \(str\)", msg)
-              m_assert = re.search(
-                  r"'(.+?)' should (contain|be equal to|not contain|start with|end with) '(.+?)'",
-                  msg, re.IGNORECASE)
+              Priorité :
+              1. Keywords de niveau 1 du test (Open Login Page, Login, Verify…)
+                 → étapes métier directement issues du fichier .robot
+              2. Fallback générique si aucun keyword utilisable trouvé
+              """
+              steps = get_steps_from_keywords(test_el)
 
-              if m_title:
-                  actual, expected = m_title.group(1), m_title.group(2)
-                  steps = [
-                      f"Ouvrir un navigateur et acceder a l'application testee.",
-                      f"Naviguer vers la page correspondant a la suite '{suite_name}'.",
-                      f"Effectuer l'action du test '{test_name}' (ex : soumettre le formulaire de connexion).",
-                      f"Observer le titre affiche sur la page apres l'action : '{actual}'.",
-                      f"Comparer avec le titre attendu : '{expected}'.",
-                      f"Constater que le titre ne correspond pas : le comportement de l'application est incorrect.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
-                  ]
-              elif m_assert:
-                  actual, cond, expected = m_assert.group(1), m_assert.group(2), m_assert.group(3)
-                  steps = [
-                      f"Ouvrir un navigateur et acceder a l'application testee.",
-                      f"Naviguer vers la page concernee par le test '{test_name}'.",
-                      f"Localiser l'element ou la zone de contenu impliquee.",
-                      f"Verifier que la valeur affichee est '{actual}'.",
-                      f"Comparer avec la valeur attendue : le contenu devrait {cond} '{expected}'.",
-                      f"Constater la difference et determiner l'origine du probleme.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
-                  ]
-              elif "timeout" in msg.lower():
-                  locator_match = re.search(r"waiting for locator\('(.+?)'\)", msg)
-                  locator_info  = f"'{locator_match.group(1)}'" if locator_match else "l'element attendu"
-                  steps = [
-                      f"Ouvrir un navigateur et acceder a l'application testee.",
-                      f"Naviguer vers la page concernee par le test '{test_name}'.",
-                      f"Effectuer l'action correspondant a l'etape '{kw}'.",
-                      f"Observer la page : l'element {locator_info} n'apparait pas.",
-                      f"Inspecter le code source (F12) pour verifier si {locator_info} existe dans le DOM.",
-                      f"Verifier si une modification recente a supprime ou renomme cet element.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
-                  ]
-              elif "element" in msg.lower() and any(
-                      k in msg.lower() for k in ["not found", "not visible", "not attached"]):
-                  selector = args[0] if args else "element inconnu"
-                  steps = [
-                      f"Ouvrir un navigateur et acceder a l'application testee.",
-                      f"Naviguer vers la page concernee par le test '{test_name}'.",
-                      f"Rechercher visuellement l'element suivant sur la page : {selector}.",
-                      f"Constater que l'element est absent, masque ou non charge.",
-                      f"Inspecter le code source de la page (F12) pour verifier la presence de l'element dans le DOM.",
-                      f"Verifier si une modification recente de l'interface a change ou supprime cet element.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
-                  ]
-              else:
-                  steps = [
-                      f"Ouvrir un navigateur et acceder a l'application testee.",
-                      f"Naviguer vers la page correspondant a la suite '{suite_name}'.",
-                      f"Reproduire manuellement les actions du test '{test_name}'.",
-                      f"Observer le comportement de l'application a l'etape '{kw}' si applicable.",
-                      f"Comparer le comportement obtenu avec le comportement attendu.",
-                      f"Consulter le log complet dans les artefacts du run CI/CD pour le detail de l'execution.",
-                      f"Consulter le screenshot joint pour voir l'etat de la page au moment de l'echec."
-                  ]
+              if steps:
+                  # Ajoute la mention screenshot en dernière étape
+                  steps.append(
+                      "Consulter le screenshot joint pour voir l'état de la page au moment de l'échec."
+                  )
+                  return steps
 
-              return steps
+              # ── Fallback générique ───────────────────────────────────────
+              kw = error.get("keyword") or ""
+              return [
+                  "Ouvrir un navigateur et accéder à l'application testée.",
+                  f"Naviguer vers la page correspondant à la suite '{suite_name}'.",
+                  f"Reproduire manuellement les actions du test '{test_name}'.",
+                  f"Observer le comportement de l'application à l'étape '{kw}'." if kw
+                  else "Observer le comportement de l'application.",
+                  "Consulter le log complet dans les artefacts du run CI/CD.",
+                  "Consulter le screenshot joint pour voir l'état de la page au moment de l'échec."
+              ]
 
-          def build_description(test_name, suite_name, error, has_screenshot=False):
+          # ----------------------------------------------------------------
+          # CONSTRUCTION DE LA DESCRIPTION JIRA (format ADF)
+          # ----------------------------------------------------------------
+
+          def build_description(test_el, test_name, suite_name, error, has_screenshot=False):
 
               def para(text):
                   return {"type": "paragraph",
@@ -520,29 +561,31 @@ jobs:
 
               content = []
 
-              # 1. Identification du test  (sans "Declenchement")
+              # 1. Identification du test
               content.append(heading("Identification du test", 3))
               content.append(bullet_list([
                   f"Projet Robot Framework : {ROBOT_PROJECT}",
                   f"Suite : {suite_name}",
                   f"Test : {test_name}",
-                  f"Date d'execution : {EXEC_DATE}",
+                  f"Date d'exécution : {EXEC_DATE}",
               ]))
               content.append(rule())
 
-              # 2. Erreur detectee
-              content.append(heading("Bug detecte", 3))
-              for line in human_error(error, test_name).split("\n"):
+              # 2. Bug détecté — utilise human_error() qui lit la [Documentation]
+              content.append(heading("Bug détecté", 3))
+              for line in human_error(test_el, error, test_name).split("\n"):
                   if line.strip():
                       content.append(para(line.strip()))
               if error.get("lines") and len(error["lines"]) > 1:
-                  content.append(heading("Detail technique", 4))
+                  content.append(heading("Détail technique", 4))
                   content.append(code_block("\n".join(error["lines"])))
               content.append(rule())
 
-              # 3. Etapes de reproduction
-              content.append(heading("Etapes de reproduction", 3))
-              content.append(ordered_list(build_steps(test_name, suite_name, error)))
+              # 3. Étapes de reproduction — issues des keywords .robot
+              content.append(heading("Étapes de reproduction", 3))
+              content.append(ordered_list(
+                  build_steps(test_el, test_name, suite_name, error)
+              ))
               content.append(rule())
 
               # 4. Liens utiles
@@ -551,10 +594,14 @@ jobs:
               if EXEC_KEY:
                   link_items.append(f"Test Execution Xray : {BASE}/browse/{EXEC_KEY}")
               if has_screenshot:
-                  link_items.append("Screenshot : voir piece jointe attachee au ticket")
+                  link_items.append("Screenshot : voir pièce jointe attachée au ticket")
               content.append(bullet_list(link_items))
 
               return {"version": 1, "type": "doc", "content": content}
+
+          # ----------------------------------------------------------------
+          # LECTURE DU OUTPUT.XML ET COLLECTE DES ECHECS
+          # ----------------------------------------------------------------
 
           try:
               root = ET.parse("Result/output.xml").getroot()
@@ -569,13 +616,14 @@ jobs:
                   st = test.find("status")
                   if st is not None and st.get("status") == "FAIL":
                       fails.append({
-                          "name":  test.get("name", "?"),
-                          "suite": suite_name,
-                          "error": get_error_details(test, st)
+                          "name":    test.get("name", "?"),
+                          "suite":   suite_name,
+                          "error":   get_error_details(test, st),
+                          "test_el": test          # élément XML complet pour doc + keywords
                       })
 
           if not fails:
-              print("Aucun test echoue - pas de bug a creer.")
+              print("Aucun test échoué - pas de bug à créer.")
               exit(0)
 
           print(f"\n{'='*65}")
@@ -597,7 +645,13 @@ jobs:
               screenshot_path = find_screenshot(t["name"])
               has_screenshot  = screenshot_path is not None
               prio            = priority(t["error"]["main"])
-              desc            = build_description(t["name"], t["suite"], t["error"], has_screenshot)
+              desc            = build_description(
+                                    t["test_el"],
+                                    t["name"],
+                                    t["suite"],
+                                    t["error"],
+                                    has_screenshot
+                                )
 
               payload = {"fields": {
                   "project":     {"key": PROJ},
@@ -616,9 +670,9 @@ jobs:
                   if screenshot_path:
                       att_id, _ = attach_file(new_key, screenshot_path)
                       if att_id:
-                          print(f"    Screenshot attache : {os.path.basename(screenshot_path)}")
+                          print(f"    Screenshot attaché : {os.path.basename(screenshot_path)}")
                       else:
-                          print(f"    Echec de l'upload du screenshot")
+                          print(f"    Échec de l'upload du screenshot")
                   else:
                       print(f"    Aucun screenshot disponible pour ce test")
                   link_to_execution(new_key)
@@ -628,7 +682,7 @@ jobs:
                   errors += 1
 
           print(f"\n{'='*65}")
-          print(f"  Crees : {created}   Ignores : {skipped}" +
+          print(f"  Créés : {created}   Ignorés : {skipped}" +
                 (f"   Erreurs : {errors}" if errors else ""))
           print(f"{'='*65}")
           PYEOF
